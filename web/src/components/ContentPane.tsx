@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
 import { fetchFile } from '../api'
 import { hydrate } from '../hydrate'
 import type { FileContent } from '../types'
 
-export function ContentPane() {
-  const params = useParams<{ '*': string }>()
-  const path = params['*'] ?? ''
+// Prop-driven (not route-driven via useParams) so a ContentPane instance
+// can be mounted once per open tab and stay alive for the tab's lifetime.
+// `visible` only toggles a `display` style on this component's own root —
+// it is never conditionally unmounted while its tab exists. Browsers
+// natively preserve scrollTop on a display:none element that stays in the
+// DOM, which is what makes "instant switch, no re-fetch, no scroll reset"
+// fall out of the existing fetch-cache logic for free.
+export function ContentPane({ path, visible }: { path: string; visible: boolean }) {
   const [file, setFile] = useState<FileContent | null>(null)
   const [error, setError] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -36,9 +40,11 @@ export function ContentPane() {
     }
   }, [file])
 
+  const rootStyle = { display: visible ? undefined : 'none' }
+
   if (!path) {
     return (
-      <main className="flex-1 overflow-y-auto p-6">
+      <main className="flex-1 overflow-y-auto p-6" style={rootStyle}>
         <p className="text-neutral-500">Select a file from the sidebar.</p>
       </main>
     )
@@ -46,7 +52,7 @@ export function ContentPane() {
 
   if (error) {
     return (
-      <main className="flex-1 overflow-y-auto p-6">
+      <main className="flex-1 overflow-y-auto p-6" style={rootStyle}>
         <p className="text-red-500">{error}</p>
       </main>
     )
@@ -54,14 +60,14 @@ export function ContentPane() {
 
   if (!file) {
     return (
-      <main className="flex-1 overflow-y-auto p-6">
+      <main className="flex-1 overflow-y-auto p-6" style={rootStyle}>
         <p className="text-neutral-400">Loading…</p>
       </main>
     )
   }
 
   return (
-    <main className="flex-1 overflow-y-auto p-6">
+    <main className="flex-1 overflow-y-auto p-6" style={rootStyle}>
       <article
         ref={containerRef}
         className="prose max-w-none dark:prose-invert"
