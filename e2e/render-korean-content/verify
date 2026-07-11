@@ -1,0 +1,50 @@
+#!/usr/bin/env node
+import path from 'node:path';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { report } from '../lib/harness.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+const resultDir = path.join(SCENARIO_DIR, 'result');
+
+const dom = readFileSync(path.join(resultDir, 'dom.html'), 'utf8');
+const nestedDom = readFileSync(path.join(resultDir, 'nested-dom.html'), 'utf8');
+const surfaces = JSON.parse(readFileSync(path.join(resultDir, 'surfaces.json'), 'utf8'));
+const nested = JSON.parse(readFileSync(path.join(resultDir, 'nested.json'), 'utf8'));
+const requests = JSON.parse(readFileSync(path.join(resultDir, 'requests.json'), 'utf8'));
+
+if (dom.includes('�') || nestedDom.includes('�')) {
+  report('unexpected', `U+FFFD replacement character found in rendered DOM. See ${resultDir}/dom.html`);
+  process.exit(0);
+}
+
+const missing = Object.entries(surfaces).filter(([, v]) => v === null);
+if (missing.length > 0) {
+  report('unexpected', `surface(s) not found in DOM: ${missing.map(([k]) => k).join(', ')}`);
+  process.exit(0);
+}
+
+const collapsed = Object.entries(surfaces).filter(([, v]) => !v.text || v.width === 0 || v.height === 0);
+if (collapsed.length > 0) {
+  report(
+    'unexpected',
+    `surface(s) rendered with empty text or a zero-size bounding box: ${collapsed.map(([k]) => k).join(', ')}. See ${resultDir}/surfaces.json`,
+  );
+  process.exit(0);
+}
+
+const external = requests.filter((u) => !u.startsWith('http://localhost:'));
+if (external.length > 0) {
+  report('unexpected', `Korean content render fired external requests: ${external.join(', ')}`);
+  process.exit(0);
+}
+
+if (!nested.title.includes('안내 문서')) {
+  report('unexpected', `nested Korean file did not load expected title. Got: ${JSON.stringify(nested)}`);
+  process.exit(0);
+}
+
+report(
+  'good',
+  'Korean prose/heading/code-block/Mermaid-label all rendered as non-empty, laid-out text nodes, no U+FFFD anywhere, nested Korean file/folder navigated correctly, zero non-localhost requests',
+);

@@ -1,7 +1,11 @@
 import mermaid from 'mermaid'
 import katex from 'katex'
 
-mermaid.initialize({ startOnLoad: false })
+// Mermaid's SVG text has its own font config independent of page CSS, so it
+// won't inherit the body font-stack automatically — read the resolved
+// value at runtime so the CSS stack (index.css) stays the single source of
+// truth and the two can't drift apart.
+mermaid.initialize({ startOnLoad: false, fontFamily: getComputedStyle(document.body).fontFamily })
 
 let mermaidCounter = 0
 

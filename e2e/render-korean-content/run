@@ -1,0 +1,93 @@
+#!/usr/bin/env node
+// Scenario: render-korean-content
+// Korean text in prose, headings, fenced code blocks, and Mermaid labels
+// must render with real, non-empty text nodes (not silently dropped/empty),
+// Mermaid's SVG text must pick up the font-family passed to
+// mermaid.initialize (page CSS alone doesn't reach it), and Korean-named
+// files/folders in the sidebar must navigate correctly -- all with zero
+// network requests.
+//
+// This scenario does not attempt to distinguish "real glyph" from "tofu
+// box" pixel-for-pixel: browsers perform unconditional per-script system
+// font fallback for canvas/DOM text that cannot be suppressed from web
+// content (verified directly -- comparing against a differently-named
+// font, a nonexistent font, and even a hard unicode-range-restricted
+// @font-face all produced byte-identical pixel output to the actual
+// applied font once any Korean-capable font exists on the machine). So a
+// font-vs-font glyph-fidelity check can never diverge in CI (which
+// installs fonts-nanum for exactly this reason) or on any dev machine
+// with a Korean font -- it would only ever fire in the accepted
+// Ambiguous Zone (no CJK font anywhere), making it structurally
+// incapable of catching the failure it's meant to catch. Glyph fidelity
+// was confirmed once by hand via screenshot; this test-loop covers the
+// structural regressions that are actually detectable client-side.
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { resetResultDir, startServer, nextPort, writeMetadata, writeText, writeJSON } from '../lib/harness.mjs';
+import { withPage } from '../lib/browser.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+// In-page: for each surface, capture its trimmed text content and pixel
+// bounding box (via getBoundingClientRect on the element actually painted
+// by the browser -- not a synthetic canvas re-render). A collapsed/zero
+// bounding box means the browser failed to lay out the text at all
+// (e.g. Mermaid swallowed an error, or the element never received its
+// content), independent of which specific glyphs got drawn.
+function captureSurfaces() {
+  function surface(el) {
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    return { text: el.textContent.trim(), width: rect.width, height: rect.height };
+  }
+
+  return {
+    heading: surface(document.querySelector('article h1')),
+    prose: surface(document.querySelector('article p')),
+    codeBlock: surface(document.querySelector('article pre')),
+    mermaidLabel: surface(document.querySelector('div.mermaid svg foreignObject p, div.mermaid svg text')),
+  };
+}
+
+async function main() {
+  const resultDir = await resetResultDir(SCENARIO_DIR);
+  const root = path.join(SCENARIO_DIR, 'data');
+  const port = nextPort();
+
+  const server = await startServer({ root, port });
+  try {
+    await withPage(async (page, requests) => {
+      await page.goto(`http://localhost:${port}/view/fixture.md`);
+      await page.waitForSelector('div.mermaid svg', { timeout: 5000 }).catch(() => {});
+
+      const fixtureDom = await page.locator('article').innerHTML();
+      const surfaces = await page.evaluate(captureSurfaces);
+
+      // Expand the Korean-named folder in the sidebar and click into the
+      // Korean-named nested file.
+      await page.locator('nav button', { hasText: '문서' }).click();
+      await page.locator('nav a', { hasText: '안내.md' }).click();
+      await page.waitForFunction(() => document.querySelector('article h1')?.textContent.trim() === '안내 문서');
+
+      const nestedDom = await page.locator('article').innerHTML();
+      const nestedTitle = await page.locator('article h1').innerText();
+
+      await writeText(resultDir, 'dom.html', fixtureDom);
+      await writeText(resultDir, 'nested-dom.html', nestedDom);
+      await writeJSON(resultDir, 'surfaces.json', surfaces);
+      await writeJSON(resultDir, 'nested.json', { title: nestedTitle });
+      await writeJSON(resultDir, 'requests.json', requests);
+    });
+  } finally {
+    await writeText(resultDir, 'server.log', server.getLogs());
+    await server.stop();
+  }
+
+  await writeMetadata(resultDir, { scenario: 'render-korean-content', root, port });
+  console.log(`run complete: ${resultDir}`);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
