@@ -20,3 +20,7 @@ and reports that path/branch back in its final output so the caller can
 find it. This was a deliberate tradeoff (confirmed twice during
 `/create-agent` grilling), not an oversight — accepted in exchange for not
 having to hand-roll `git worktree add` plumbing inside the agent itself.
+
+Related: [[20260712-002000-isolated-adr-runner-cannot-honor-user-confirmation-gates]]
+(a different structural gap in the same agent — honoring an ADR's live
+user-confirmation gate before a shared/remote action — with the same root cause).
