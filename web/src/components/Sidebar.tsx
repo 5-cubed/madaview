@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { fetchTree } from '../api'
+import { useWorkspace } from '../useWorkspace'
 import type { TreeEntry } from '../types'
 
 export function Sidebar() {
@@ -47,16 +47,18 @@ function TreeLevel({ path }: { path: string }) {
 
 function TreeNode({ entry }: { entry: TreeEntry }) {
   const [expanded, setExpanded] = useState(false)
+  const { openFile } = useWorkspace()
 
   if (!entry.isDir) {
     return (
       <li>
-        <Link
-          to={`/view/${entry.path}`}
-          className="block rounded px-2 py-1 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        <button
+          type="button"
+          onClick={() => openFile(entry.path)}
+          className="block w-full rounded px-2 py-1 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800"
         >
           {entry.name}
-        </Link>
+        </button>
       </li>
     )
   }

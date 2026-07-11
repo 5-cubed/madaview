@@ -1,0 +1,289 @@
+#!/usr/bin/env node
+// Scenario: tabs-and-split-view
+// Drives the tabs/split-view workspace (see
+// .context/adr/20260712-001324-tabs-and-split-view.md) through the full
+// 11-checkpoint interaction sequence, capturing a snapshot after each step
+// into result/interactions.json: tab count per pane, pane count, focused
+// pane id, active tab id, window.location.pathname, cumulative /api/file
+// request count, and scrollTop of the active content root.
+//
+// Sequence design (traced against the reducer's actual semantics so each
+// checkpoint exercises something distinct, not a no-op left over from a
+// prior step):
+//   1. open a.md, b.md            -> pane1: [a, b*]
+//   2. scroll a, b, back to a     -> pane1: [a*, b]  (scroll/no-refetch check)
+//   3. re-click a (already open)  -> pane1: [a*, b]  (no dup)
+//   4. split-right on a           -> pane1: [a*, b], pane2: [a2*] (focused)
+//   5. click c.md (pane2 focused) -> pane2: [a2, c*]
+//   5b. click b.md (pane2 still focused, b not open there yet)
+//       -> pane2: [a2, c, b*]  (gives checkpoint 6/7 three tabs to work with)
+//   6. close non-active tab a2, *within the focused pane* (pane2)
+//      -> pane2: [c, b*]  (active tab/URL/scroll of the tab being viewed
+//         all unchanged; isolates this from the separate "interacting
+//         with a pane focuses it" rule by staying within the already-
+//         focused pane)
+//   7. close active tab b (pane2) -> pane2: [c*]  (left neighbor activates)
+//   8. close pane1's tabs down to zero -> pane1 gone, pane2 is the only
+//      pane left (full width, single pane element in the DOM)
+//   9. settings round trip (via sidebar click back, not browser back,
+//      since popstate is an intentional full reset per the ADR)
+//   10. reload -> single pane/single tab matching URL
+//   11. fresh root load, open a tab, then history.back() -> resets to a
+//       fresh single-pane/single-tab workspace matching the landed-on URL
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { resetResultDir, startServer, nextPort, writeMetadata, writeJSON, writeText } from '../lib/harness.mjs';
+import { withPage } from '../lib/browser.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+// Reads a full workspace snapshot from the live page: pane/tab structure
+// via the data-* hooks TabStrip/Pane expose, plus URL and scroll state.
+async function snapshot(page) {
+  return page.evaluate(() => {
+    const paneEls = Array.from(document.querySelectorAll('[data-pane-root]'));
+    const panes = paneEls.map((paneEl) => {
+      const paneId = paneEl.getAttribute('data-pane-root');
+      const focused = paneEl.getAttribute('data-focused') === 'true';
+      const tabEls = Array.from(paneEl.querySelectorAll('[data-tab-id]'));
+      const tabs = tabEls.map((t) => ({
+        tabId: t.getAttribute('data-tab-id'),
+        active: t.getAttribute('data-active') === 'true',
+      }));
+      const activeTab = tabs.find((t) => t.active) ?? null;
+      // The visible content root among this pane's ContentPane instances.
+      const mains = Array.from(paneEl.querySelectorAll('main'));
+      const visibleMain = mains.find((m) => getComputedStyle(m).display !== 'none') ?? null;
+      return {
+        paneId,
+        focused,
+        tabCount: tabs.length,
+        activeTabId: activeTab ? activeTab.tabId : null,
+        scrollTop: visibleMain ? visibleMain.scrollTop : null,
+      };
+    });
+    return {
+      paneCount: panes.length,
+      panes,
+      pathname: window.location.pathname,
+    };
+  });
+}
+
+function countApiFileRequests(requests) {
+  return requests.filter((u) => u.includes('/api/file')).length;
+}
+
+async function scrollTopOfVisibleMain(page) {
+  return page.evaluate(() => {
+    const mains = Array.from(document.querySelectorAll('main'));
+    const visible = mains.find((m) => getComputedStyle(m).display !== 'none');
+    return visible ? visible.scrollTop : null;
+  });
+}
+
+async function main() {
+  const resultDir = await resetResultDir(SCENARIO_DIR);
+  const root = path.join(SCENARIO_DIR, 'data');
+  const port = nextPort();
+
+  const server = await startServer({ root, port });
+  const checkpoints = {};
+  const consoleErrors = [];
+
+  try {
+    await withPage(async (page, requests) => {
+      page.on('console', (msg) => {
+        if (msg.type() === 'error') consoleErrors.push(msg.text());
+      });
+      page.on('pageerror', (err) => consoleErrors.push(String(err)));
+
+      await page.goto(`http://localhost:${port}/`);
+      await page.waitForSelector('nav a, nav button', { timeout: 5000 }).catch(() => {});
+
+      // Sidebar entries are buttons (openFile), not <a> links.
+      const sidebarButton = (name) => page.locator('nav button', { hasText: name }).first();
+
+      // --- Checkpoint 1: open a.md and b.md via sidebar clicks ---
+      await sidebarButton('a.md').click();
+      await page.waitForSelector('main article', { timeout: 5000 }).catch(() => {});
+      await sidebarButton('b.md').click();
+      await page.waitForTimeout(200);
+      checkpoints.step1_openTwoTabs = {
+        ...(await snapshot(page)),
+        apiFileRequests: countApiFileRequests(requests),
+      };
+
+      // --- Checkpoint 2: scroll a.md, switch to b.md, switch back ---
+      await sidebarButton('a.md').click();
+      await page.waitForTimeout(100);
+      const requestsBeforeScrollTest = countApiFileRequests(requests);
+      await page.evaluate(() => {
+        const mains = Array.from(document.querySelectorAll('main'));
+        const visible = mains.find((m) => getComputedStyle(m).display !== 'none');
+        if (visible) visible.scrollTop = 500;
+      });
+      const scrollTopAfterScroll = await scrollTopOfVisibleMain(page);
+      await sidebarButton('b.md').click();
+      await page.waitForTimeout(100);
+      await sidebarButton('a.md').click();
+      await page.waitForTimeout(100);
+      const scrollTopAfterReturn = await scrollTopOfVisibleMain(page);
+      checkpoints.step2_scrollPreservedNoRefetch = {
+        scrollTopAfterScroll,
+        scrollTopAfterReturn,
+        apiFileRequestsBefore: requestsBeforeScrollTest,
+        apiFileRequestsAfter: countApiFileRequests(requests),
+        snapshot: await snapshot(page),
+      };
+
+      // --- Checkpoint 3: re-click a.md (already open, already active) -> no dup tab ---
+      await sidebarButton('a.md').click();
+      await page.waitForTimeout(100);
+      checkpoints.step3_reclickNoDuplicate = await snapshot(page);
+
+      // --- Checkpoint 4: split-right on the active tab (a.md) ---
+      const pane1IdBeforeSplit = (await snapshot(page)).panes[0].paneId;
+      await page.locator('[data-active="true"] [data-action="split-right"]').first().click();
+      await page.waitForTimeout(150);
+      const splitSnapshot = await snapshot(page);
+      const splitRightIconCount = await page.locator('[data-action="split-right"]').count();
+      checkpoints.step4_splitRight = { ...splitSnapshot, splitRightIconCount };
+
+      const pane1Id = pane1IdBeforeSplit;
+      const pane2Id = splitSnapshot.panes.find((p) => p.paneId !== pane1Id).paneId;
+
+      // --- Checkpoint 5: with pane 2 focused, click c.md -> opens in pane 2 ---
+      await sidebarButton('c.md').click();
+      await page.waitForTimeout(150);
+      checkpoints.step5_sidebarTargetsFocusedPane = await snapshot(page);
+
+      // --- Checkpoint 5b: pane 2 still focused, open b.md too (not yet
+      // open there) -> pane2: [a2, c, b*]. Gives checkpoints 6/7 three
+      // tabs so closing a non-active one (6) and then the active one (7)
+      // are both meaningfully distinct from "the pane collapses".
+      await sidebarButton('b.md').click();
+      await page.waitForTimeout(150);
+      checkpoints.step5b_openThirdTabInFocusedPane = await snapshot(page);
+
+      // --- Checkpoint 6: close a non-active tab *within the focused pane*
+      // (pane2, which has [a2, c, b*] after step 5b) -> the active tab id,
+      // URL, and scroll position of the tab the user is looking at (b.md)
+      // are all unchanged. Closing within the already-focused pane isolates
+      // this from the separate "interacting with a pane focuses it" rule,
+      // which would otherwise conflate "focus moved" with "active tab
+      // changed" if the non-active tab closed belonged to the *other* pane.
+      const beforeStep6 = await snapshot(page);
+      const scrollBeforeStep6 = await scrollTopOfVisibleMain(page);
+      const pane2NonActiveTabId = await page.evaluate((paneId) => {
+        const paneEl = document.querySelector(`[data-pane-root="${paneId}"]`);
+        const tabEls = Array.from(paneEl.querySelectorAll('[data-tab-id]'));
+        const nonActive = tabEls.find((t) => t.getAttribute('data-active') !== 'true');
+        return nonActive ? nonActive.getAttribute('data-tab-id') : null;
+      }, pane2Id);
+      let step6Result = { skipped: true, reason: 'no non-active tab in pane2' };
+      if (pane2NonActiveTabId) {
+        await page.locator(`[data-tab-id="${pane2NonActiveTabId}"] [data-action="close"]`).click();
+        await page.waitForTimeout(100);
+        step6Result = {
+          skipped: false,
+          activeTabIdBefore: beforeStep6.panes.find((p) => p.paneId === pane2Id)?.activeTabId,
+          pathnameBefore: beforeStep6.pathname,
+          scrollBeforeStep6,
+          scrollAfterStep6: await scrollTopOfVisibleMain(page),
+          snapshotAfter: await snapshot(page),
+        };
+      }
+      checkpoints.step6_closeNonActiveTab = step6Result;
+
+      // --- Checkpoint 7: close the active tab in pane2 -> left neighbor activates ---
+      const beforeStep7 = await snapshot(page);
+      const pane2BeforeClose = beforeStep7.panes.find((p) => p.paneId === pane2Id);
+      const activeTabIdToClose = pane2BeforeClose?.activeTabId;
+      if (activeTabIdToClose) {
+        await page.locator(`[data-tab-id="${activeTabIdToClose}"] [data-action="close"]`).click();
+        await page.waitForTimeout(100);
+      }
+      checkpoints.step7_closeActiveTabActivatesNeighbor = {
+        closedTabId: activeTabIdToClose,
+        snapshotAfter: await snapshot(page),
+      };
+
+      // --- Checkpoint 8: close pane1's tabs down to zero -> pane1 gone,
+      // pane2 is the only pane left (full width, single pane element).
+      // pane1 still holds [a, b] from step 1 (untouched by steps 2-7,
+      // which all operated on pane2) — close both of its tabs.
+      let closeGuard = 0;
+      while (closeGuard < 10) {
+        const snap = await snapshot(page);
+        const pane1Now = snap.panes.find((p) => p.paneId === pane1Id);
+        if (!pane1Now) break;
+        await page.locator(`[data-tab-id="${pane1Now.activeTabId}"] [data-action="close"]`).click();
+        await page.waitForTimeout(100);
+        closeGuard += 1;
+      }
+      checkpoints.step8_closeLastTabCollapsesPane = { closesNeeded: closeGuard, ...(await snapshot(page)) };
+
+      // --- Checkpoint 9: navigate to /settings and back (via sidebar click,
+      // which is the app's own "return to viewer" affordance) -> state
+      // intact. Using the browser back button here would instead exercise
+      // the (separate, intentional) popstate-reset behavior covered by
+      // checkpoint 11, not this one.
+      const beforeSettingsNav = await snapshot(page);
+      await page.locator('a', { hasText: 'Settings' }).click();
+      await page.waitForTimeout(150);
+      const onSettingsPane1Snapshot = await snapshot(page); // workspace should be untouched, just not visible
+      // Re-click the tab that's already active in the focused pane (c.md):
+      // any sidebar click while on /settings returns to /view, and since
+      // c.md is already open+active there, this returns without itself
+      // mutating pane/tab state (a plain "return to viewer" round trip).
+      await sidebarButton('c.md').click();
+      await page.waitForTimeout(150);
+      checkpoints.step9_settingsRoundTrip = {
+        before: beforeSettingsNav,
+        whileOnSettings: onSettingsPane1Snapshot,
+        after: await snapshot(page),
+      };
+
+      // --- Checkpoint 10: reload the page at whatever URL is current ---
+      await page.reload();
+      await page.waitForTimeout(200);
+      checkpoints.step10_reloadResets = await snapshot(page);
+
+      // --- Checkpoint 11: history.back() after a fresh single tab-open ---
+      // Start clean at root ('' path, empty workspace), open a.md (pushes
+      // /view/a.md via WorkspaceProvider's effect), then history.back().
+      // Per the ADR, popstate always resets to a fresh single-pane/single-
+      // tab workspace matching the landed-on URL — never a restored
+      // multi-tab layout.
+      await page.goto(`http://localhost:${port}/`);
+      await page.waitForTimeout(150);
+      const pathAtRootLoad = (await snapshot(page)).pathname;
+      await sidebarButton('a.md').click();
+      await page.waitForTimeout(150);
+      const pathAfterOpen = (await snapshot(page)).pathname;
+      await page.goBack();
+      await page.waitForTimeout(150);
+      checkpoints.step11_backAfterFreshOpen = {
+        pathAtRootLoad,
+        pathAfterOpen,
+        snapshotAfterBack: await snapshot(page),
+      };
+
+      await writeJSON(resultDir, 'requests.json', requests);
+    });
+  } finally {
+    await writeText(resultDir, 'server.log', server.getLogs());
+    await server.stop();
+  }
+
+  await writeJSON(resultDir, 'consoleErrors.json', consoleErrors);
+  await writeJSON(resultDir, 'interactions.json', checkpoints);
+  await writeMetadata(resultDir, { scenario: 'tabs-and-split-view', root, port });
+  console.log(`run complete: ${resultDir}`);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
