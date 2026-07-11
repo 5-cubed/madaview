@@ -1,0 +1,38 @@
+#!/usr/bin/env node
+import path from 'node:path';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { report } from '../lib/harness.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+const resultDir = path.join(SCENARIO_DIR, 'result');
+
+const dom = readFileSync(path.join(resultDir, 'dom.html'), 'utf8');
+const requests = JSON.parse(readFileSync(path.join(resultDir, 'requests.json'), 'utf8'));
+
+const svgFenceCount = (dom.match(/<div class="plantuml">[\s\S]*?<svg/g) || []).length;
+// The clean inline error is a single text node: '<div class="plantuml">PlantUML
+// render error: ...</div>' with no nested <svg>. Match it precisely so this
+// check doesn't also match the "(Assumed diagram type: ...)" wording that
+// legitimately appears *inside* our own extracted one-line message.
+const inlineErrorMatch = dom.match(/<div class="plantuml">PlantUML render error: [^<]*<\/div>/);
+// Markers unique to PlantUML's raw, noisy native error card (the unstamped
+// version-nag banner and its multi-line "Possible causes/Suggested actions"
+// prose) — never present in our clean single-line extracted message.
+const hasNativeErrorCard = /plantuml\.com\/download|This version of PlantUML is|Possible causes:|Suggested actions:/.test(dom);
+const hasTrailingHeading = /After The Broken Diagram/.test(dom);
+const external = requests.filter((u) => !u.startsWith('http://localhost:'));
+
+if (svgFenceCount < 3) {
+  report('unexpected', `expected 3 alias fences (plantuml/puml/uml) to render <svg>, found ${svgFenceCount}. See ${resultDir}/dom.html`);
+} else if (!inlineErrorMatch) {
+  report('unexpected', `invalid-syntax fence did not produce a clean "PlantUML render error:" text node. See ${resultDir}/dom.html`);
+} else if (hasNativeErrorCard) {
+  report('unexpected', `PlantUML's own noisy native error card leaked into the page instead of a clean inline error. See ${resultDir}/dom.html`);
+} else if (!hasTrailingHeading) {
+  report('unexpected', `content after the broken diagram did not render — one bad diagram took down the rest of the document. See ${resultDir}/dom.html`);
+} else if (external.length > 0) {
+  report('unexpected', `plantuml hydration fired external requests: ${external.join(', ')}`);
+} else {
+  report('good', `all 3 fence aliases hydrated to <svg>, invalid fence showed a clean inline error, rest of document rendered, zero network requests`);
+}

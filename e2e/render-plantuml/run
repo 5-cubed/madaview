@@ -1,0 +1,56 @@
+#!/usr/bin/env node
+// Scenario: render-plantuml
+// All three fence aliases (plantuml, puml, uml) must hydrate to real <svg>
+// elements, with no network requests fired during hydration (the ADR's hard
+// requirement: diagram source never leaves the browser). An invalid-syntax
+// fence must not crash the page or block the rest of the document.
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { resetResultDir, startServer, nextPort, writeMetadata, writeText, writeJSON } from '../lib/harness.mjs';
+import { withPage } from '../lib/browser.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+async function main() {
+  const resultDir = await resetResultDir(SCENARIO_DIR);
+  const root = path.join(SCENARIO_DIR, 'data');
+  const port = nextPort();
+
+  const server = await startServer({ root, port });
+  try {
+    await withPage(async (page, requests) => {
+      await page.goto(`http://localhost:${port}/view/fixture.md`);
+      // Placeholder divs already carry non-empty raw-source text before
+      // hydration runs, so "non-empty textContent" is true instantly and
+      // never actually waits for hydration. Wait for each block to reach
+      // its real post-hydration shape instead: either an <svg> child or the
+      // "PlantUML render error:" text hydratePlantuml writes on failure.
+      await page.waitForFunction(
+        () => {
+          const blocks = document.querySelectorAll('div.plantuml');
+          return (
+            blocks.length > 0 &&
+            [...blocks].every(
+              (el) => el.querySelector('svg') || el.textContent.trim().startsWith('PlantUML render error:'),
+            )
+          );
+        },
+        { timeout: 10000 },
+      ).catch(() => {});
+      const dom = await page.locator('article').innerHTML();
+      await writeText(resultDir, 'dom.html', dom);
+      await writeJSON(resultDir, 'requests.json', requests);
+    });
+  } finally {
+    await writeText(resultDir, 'server.log', server.getLogs());
+    await server.stop();
+  }
+
+  await writeMetadata(resultDir, { scenario: 'render-plantuml', root, port });
+  console.log(`run complete: ${resultDir}`);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
