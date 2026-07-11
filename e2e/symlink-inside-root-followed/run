@@ -9,7 +9,7 @@
 // avoid symlink portability issues across checkouts/platforms.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { symlink, rm } from 'node:fs/promises';
+import { symlink, rm, mkdir } from 'node:fs/promises';
 import { resetResultDir, startServer, nextPort, writeMetadata, writeJSON, writeText } from '../lib/harness.mjs';
 
 const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -20,6 +20,7 @@ async function main() {
   const linkPath = path.join(root, 'linked.md');
   const target = path.join(SCENARIO_DIR, 'data', 'outside', 'secret.md');
 
+  await mkdir(root, { recursive: true });
   await rm(linkPath, { force: true });
   await symlink(target, linkPath);
 
