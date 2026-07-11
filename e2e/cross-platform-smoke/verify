@@ -1,0 +1,19 @@
+#!/usr/bin/env node
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { report, readResultJSON } from '../lib/harness.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+const resultDir = path.join(SCENARIO_DIR, 'result');
+
+const { status, error } = readResultJSON(resultDir, 'result.json');
+
+if (error) {
+  report('unexpected', `binary did not respond: ${error}. See ${resultDir}/server.log`);
+} else if (status.httpStatus !== 200) {
+  report('unexpected', `/api/status returned ${status.httpStatus}, want 200`);
+} else if (!status.body?.version || !status.body?.os || !status.body?.arch) {
+  report('unexpected', `/api/status body missing expected fields: ${JSON.stringify(status.body)}`);
+} else {
+  report('good', `native binary answered /api/status (${status.body.os}/${status.body.arch}, go ${status.body.goVersion})`);
+}

@@ -1,0 +1,22 @@
+#!/usr/bin/env node
+import path from 'node:path';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { report } from '../lib/harness.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+const resultDir = path.join(SCENARIO_DIR, 'result');
+
+const dom = readFileSync(path.join(resultDir, 'dom.html'), 'utf8');
+const requests = JSON.parse(readFileSync(path.join(resultDir, 'requests.json'), 'utf8'));
+
+const hasSvg = /<div class="mermaid">[\s\S]*?<svg/.test(dom);
+const external = requests.filter((u) => !u.startsWith('http://localhost:'));
+
+if (!hasSvg) {
+  report('unexpected', `no <svg> found inside .mermaid div. See ${resultDir}/dom.html`);
+} else if (external.length > 0) {
+  report('unexpected', `mermaid hydration fired external requests: ${external.join(', ')}`);
+} else {
+  report('good', 'mermaid fence hydrated to <svg> with zero network requests');
+}

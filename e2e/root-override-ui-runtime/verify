@@ -1,0 +1,26 @@
+#!/usr/bin/env node
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { report, readResultJSON } from '../lib/harness.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+const resultDir = path.join(SCENARIO_DIR, 'result');
+
+const postRootStatus = readResultJSON(resultDir, 'postRootStatus.json');
+const persistedConfig = readResultJSON(resultDir, 'persistedConfig.json');
+const relaunchStatus = readResultJSON(resultDir, 'relaunchStatus.json');
+const metadata = readResultJSON(resultDir, 'metadata.json');
+
+const failures = [];
+if (postRootStatus.status !== 200) failures.push(`POST /api/root returned ${postRootStatus.status}`);
+if (postRootStatus.body?.currentRoot !== metadata.newRoot) failures.push('POST /api/root response did not reflect new root immediately');
+if (postRootStatus.body?.rootSource !== 'ui') failures.push(`rootSource after POST = ${postRootStatus.body?.rootSource}, want "ui"`);
+if (persistedConfig?.root !== metadata.newRoot) failures.push(`persisted config root = ${persistedConfig?.root}, want ${metadata.newRoot}`);
+if (relaunchStatus?.currentRoot !== metadata.newRoot) failures.push(`relaunch (no --root) currentRoot = ${relaunchStatus?.currentRoot}, want ${metadata.newRoot}`);
+if (relaunchStatus?.rootSource !== 'ui') failures.push(`relaunch rootSource = ${relaunchStatus?.rootSource}, want "ui" (from persisted config)`);
+
+if (failures.length > 0) {
+  report('unexpected', `${failures.join('; ')}. See ${resultDir}/*.json`);
+} else {
+  report('good', 'runtime root switch reflected immediately in /api/status and persisted for the next launch');
+}

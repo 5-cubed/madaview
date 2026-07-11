@@ -1,0 +1,47 @@
+#!/usr/bin/env node
+// Scenario: path-traversal-rejected
+// "../" and absolute-path escape attempts against /api/file and /api/tree
+// must return 403/404 with no file content in the response body.
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { resetResultDir, startServer, nextPort, writeMetadata, writeJSON, writeText } from '../lib/harness.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+const ATTEMPTS = [
+  '../../../etc/passwd',
+  '../../etc/passwd',
+  '/etc/passwd',
+  '..%2f..%2f..%2fetc%2fpasswd',
+];
+
+async function main() {
+  const resultDir = await resetResultDir(SCENARIO_DIR);
+  const root = path.join(SCENARIO_DIR, 'data');
+  const port = nextPort();
+
+  const server = await startServer({ root, port });
+  const results = [];
+  try {
+    for (const endpoint of ['/api/file', '/api/tree']) {
+      for (const attempt of ATTEMPTS) {
+        const url = `http://localhost:${port}${endpoint}?path=${encodeURIComponent(attempt)}`;
+        const res = await fetch(url);
+        const body = await res.text();
+        results.push({ endpoint, attempt, status: res.status, body });
+      }
+    }
+  } finally {
+    await writeText(resultDir, 'server.log', server.getLogs());
+    await server.stop();
+  }
+
+  await writeJSON(resultDir, 'attempts.json', results);
+  await writeMetadata(resultDir, { scenario: 'path-traversal-rejected', root, port });
+  console.log(`run complete: ${resultDir}`);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

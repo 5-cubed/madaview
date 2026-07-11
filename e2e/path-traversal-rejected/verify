@@ -1,0 +1,24 @@
+#!/usr/bin/env node
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { report, readResultJSON } from '../lib/harness.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+const resultDir = path.join(SCENARIO_DIR, 'result');
+
+const results = readResultJSON(resultDir, 'attempts.json');
+
+const failures = results.filter((r) => {
+  const statusOk = r.status === 403 || r.status === 404;
+  const noLeak = !r.body.includes('root:') && !r.body.includes('/bin/');
+  return !statusOk || !noLeak;
+});
+
+if (failures.length > 0) {
+  report(
+    'unexpected',
+    `${failures.length} traversal attempt(s) not rejected: ${JSON.stringify(failures)}. See ${resultDir}/attempts.json`,
+  );
+} else {
+  report('good', `all ${results.length} traversal attempts returned 403/404 with no leaked content`);
+}

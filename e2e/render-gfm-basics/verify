@@ -1,0 +1,28 @@
+#!/usr/bin/env node
+// Verifies result/dom.html from the last `run`: expects a real <table>,
+// disabled checkbox inputs for the task list, and a highlighted <pre> for
+// the fenced code block.
+import path from 'node:path';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { report } from '../lib/harness.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+const resultDir = path.join(SCENARIO_DIR, 'result');
+
+const dom = readFileSync(path.join(resultDir, 'dom.html'), 'utf8');
+
+const checks = [
+  ['<table>', dom.includes('<table>')],
+  ['checkbox inputs', /type="checkbox"/.test(dom)],
+  ['disabled checkbox', /disabled/.test(dom)],
+  ['highlighted <pre>', dom.includes('<pre') && /class="chroma"|<span/.test(dom)],
+];
+
+const failed = checks.filter(([, ok]) => !ok).map(([name]) => name);
+
+if (failed.length > 0) {
+  report('unexpected', `missing: ${failed.join(', ')}. See ${resultDir}/dom.html and server.log`);
+} else {
+  report('good', 'table, task-list checkboxes, and highlighted code block all rendered');
+}

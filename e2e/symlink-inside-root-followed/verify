@@ -1,0 +1,17 @@
+#!/usr/bin/env node
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { report, readResultJSON } from '../lib/harness.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+const resultDir = path.join(SCENARIO_DIR, 'result');
+
+const result = readResultJSON(resultDir, 'result.json');
+
+if (result.status !== 200) {
+  report('unexpected', `expected 200 serving the symlink target, got ${result.status}. See ${resultDir}/result.json`);
+} else if (!result.body.includes('Secret Outside Root')) {
+  report('unexpected', `response body missing target content. See ${resultDir}/result.json`);
+} else {
+  report('good', 'symlink physically under root was followed to its outside-root target');
+}

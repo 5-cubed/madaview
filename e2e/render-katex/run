@@ -1,0 +1,40 @@
+#!/usr/bin/env node
+// Scenario: render-katex
+// Inline and block math must hydrate to rendered KaTeX glyphs (.katex
+// class present), with no network requests fired during hydration.
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { resetResultDir, startServer, nextPort, writeMetadata, writeText, writeJSON } from '../lib/harness.mjs';
+import { withPage } from '../lib/browser.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+async function main() {
+  const resultDir = await resetResultDir(SCENARIO_DIR);
+  const root = path.join(SCENARIO_DIR, 'data');
+  const port = nextPort();
+
+  const server = await startServer({ root, port });
+  try {
+    await withPage(async (page, requests) => {
+      await page.goto(`http://localhost:${port}/view/fixture.md`);
+      await page.waitForSelector('.katex', { timeout: 5000 }).catch(() => {});
+      const dom = await page.locator('article').innerHTML();
+      const katexCount = await page.locator('.katex').count();
+      await writeText(resultDir, 'dom.html', dom);
+      await writeJSON(resultDir, 'requests.json', requests);
+      await writeJSON(resultDir, 'katexCount.json', { katexCount });
+    });
+  } finally {
+    await writeText(resultDir, 'server.log', server.getLogs());
+    await server.stop();
+  }
+
+  await writeMetadata(resultDir, { scenario: 'render-katex', root, port });
+  console.log(`run complete: ${resultDir}`);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

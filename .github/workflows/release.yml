@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  # A tag must represent a working release: re-run the full test suite
+  # before touching any cross-compiled artifacts.
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+            smoke: true
+          - os: windows
+            arch: amd64
+            runner: windows-latest
+            smoke: true
+          - os: darwin
+            arch: arm64
+            runner: macos-latest
+            smoke: true
+          - os: darwin
+            arch: amd64
+            runner: macos-latest
+            # No Intel Mac runner exists to execute this binary on, per the
+            # ADR's Ambiguous Zone: build-only verification is accepted as
+            # ambiguous-but-not-blocking for this one target.
+            smoke: false
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build frontend
+        run: |
+          cd web
+          npm ci
+          npm run build
+
+      - name: Embed frontend
+        run: |
+          rm -rf internal/assets/dist
+          cp -r web/dist internal/assets/dist
+
+      - name: Determine artifact name
+        id: artifact
+        run: |
+          name="madaview-${{ matrix.os }}-${{ matrix.arch }}"
+          if [ "${{ matrix.os }}" = "windows" ]; then name="$name.exe"; fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Cross-compile
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p dist
+          go build -ldflags "-X main.version=${{ github.ref_name }}" \
+            -o "dist/${{ steps.artifact.outputs.name }}" ./cmd/madaview
+
+      - name: Smoke test (launch binary, curl /api/status)
+        if: matrix.smoke
+        run: |
+          "./dist/${{ steps.artifact.outputs.name }}" --root . --port 4800 &
+          server_pid=$!
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4800/api/status > /tmp/status.json; then break; fi
+            sleep 1
+          done
+          echo "--- /api/status ---"
+          cat /tmp/status.json
+          kill "$server_pid"
+          grep -q '"version"' /tmp/status.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: dist/${{ steps.artifact.outputs.name }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

@@ -1,0 +1,44 @@
+#!/usr/bin/env node
+// Scenario: root-override-cli
+// Launching with --root <fixture> must be reflected in GET /api/status
+// (currentRoot, rootSource: "cli").
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { mkdir } from 'node:fs/promises';
+import { resetResultDir, startServer, nextPort, writeMetadata, writeJSON, writeText } from '../lib/harness.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+async function main() {
+  const resultDir = await resetResultDir(SCENARIO_DIR);
+  const root = path.join(SCENARIO_DIR, 'data');
+  const port = nextPort();
+
+  // Isolate the OS user-config dir so this run never reads or writes the
+  // developer's real persisted root.
+  const configHome = path.join(resultDir, 'config-home');
+  await mkdir(configHome, { recursive: true });
+
+  const server = await startServer({
+    root,
+    port,
+    env: { HOME: configHome, XDG_CONFIG_HOME: path.join(configHome, '.config'), APPDATA: configHome },
+  });
+  let status;
+  try {
+    const res = await fetch(`http://localhost:${port}/api/status`);
+    status = await res.json();
+  } finally {
+    await writeText(resultDir, 'server.log', server.getLogs());
+    await server.stop();
+  }
+
+  await writeJSON(resultDir, 'status.json', status);
+  await writeMetadata(resultDir, { scenario: 'root-override-cli', root, port });
+  console.log(`run complete: ${resultDir}`);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

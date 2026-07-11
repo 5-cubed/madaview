@@ -1,0 +1,76 @@
+#!/usr/bin/env node
+// Scenario: root-override-ui-runtime
+// POST /api/root must live-switch the server without restart, /api/status
+// must reflect the new root immediately, and the value must persist to the
+// OS config dir so the *next* launch (with no --root flag) picks it up
+// automatically.
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { mkdir, readFile } from 'node:fs/promises';
+import { resetResultDir, startServer, nextPort, writeMetadata, writeJSON, writeText } from '../lib/harness.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+function configPath(configHome) {
+  if (process.platform === 'darwin') {
+    return path.join(configHome, 'Library', 'Application Support', 'madaview', 'config.json');
+  }
+  if (process.platform === 'win32') {
+    return path.join(configHome, 'madaview', 'config.json');
+  }
+  return path.join(configHome, '.config', 'madaview', 'config.json');
+}
+
+async function main() {
+  const resultDir = await resetResultDir(SCENARIO_DIR);
+  const initialRoot = path.join(SCENARIO_DIR, 'data', 'initial');
+  const newRoot = path.join(SCENARIO_DIR, 'data', 'new-target');
+  const configHome = path.join(resultDir, 'config-home');
+  await mkdir(configHome, { recursive: true });
+  const env = { HOME: configHome, XDG_CONFIG_HOME: path.join(configHome, '.config'), APPDATA: path.join(configHome, 'madaview-appdata') };
+
+  const port1 = nextPort();
+  const server1 = await startServer({ root: initialRoot, port: port1, env });
+  let postRootStatus;
+  try {
+    const postRes = await fetch(`http://localhost:${port1}/api/root`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ root: newRoot }),
+    });
+    postRootStatus = { status: postRes.status, body: await postRes.json() };
+  } finally {
+    await writeText(resultDir, 'server1.log', server1.getLogs());
+    await server1.stop();
+  }
+
+  let persistedConfig = null;
+  try {
+    persistedConfig = JSON.parse(await readFile(configPath(configHome), 'utf8'));
+  } catch (err) {
+    persistedConfig = { error: String(err) };
+  }
+
+  // Relaunch with no --root flag: it must pick up the persisted root.
+  const port2 = nextPort();
+  const server2 = await startServer({ root: null, port: port2, env });
+  let relaunchStatus;
+  try {
+    const res = await fetch(`http://localhost:${port2}/api/status`);
+    relaunchStatus = await res.json();
+  } finally {
+    await writeText(resultDir, 'server2.log', server2.getLogs());
+    await server2.stop();
+  }
+
+  await writeJSON(resultDir, 'postRootStatus.json', postRootStatus);
+  await writeJSON(resultDir, 'persistedConfig.json', persistedConfig);
+  await writeJSON(resultDir, 'relaunchStatus.json', relaunchStatus);
+  await writeMetadata(resultDir, { scenario: 'root-override-ui-runtime', initialRoot, newRoot, port1, port2 });
+  console.log(`run complete: ${resultDir}`);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

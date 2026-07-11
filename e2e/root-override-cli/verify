@@ -1,0 +1,18 @@
+#!/usr/bin/env node
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { report, readResultJSON } from '../lib/harness.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+const resultDir = path.join(SCENARIO_DIR, 'result');
+
+const status = readResultJSON(resultDir, 'status.json');
+const metadata = readResultJSON(resultDir, 'metadata.json');
+
+if (status.rootSource !== 'cli') {
+  report('unexpected', `rootSource = ${status.rootSource}, want "cli". See ${resultDir}/status.json`);
+} else if (status.currentRoot !== metadata.root) {
+  report('unexpected', `currentRoot = ${status.currentRoot}, want ${metadata.root}`);
+} else {
+  report('good', '--root flag correctly reflected in /api/status as rootSource=cli');
+}

@@ -1,0 +1,33 @@
+# Go
+/madaview
+/dist/
+*.exe
+*.test
+
+# Node
+web/node_modules/
+web/dist/
+
+# internal/assets/dist is the go:embed target; the Makefile copies
+# web/dist's build output here. Keep a placeholder index.html checked in so
+# `go build`/`go vet`/`go test` succeed on a fresh clone before anyone has
+# run the frontend build.
+internal/assets/dist/*
+!internal/assets/dist/index.html
+
+# Test/e2e outputs
+e2e/**/result/
+e2e/node_modules/
+e2e/.bin/
+# Created at runtime by e2e/symlink-inside-root-followed/run; not checked
+# in, to avoid symlink portability issues across checkouts/platforms.
+e2e/symlink-inside-root-followed/data/root/linked.md
+playwright-report/
+test-results/
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
