@@ -68,6 +68,27 @@ func TestRender_MermaidFenceEmitsPlaceholderWithRawSource(t *testing.T) {
 	}
 }
 
+func TestRender_PlantumlFenceEmitsPlaceholderWithRawSource(t *testing.T) {
+	for _, lang := range []string{"plantuml", "puml", "uml"} {
+		t.Run(lang, func(t *testing.T) {
+			source := "```" + lang + "\nAlice -> Bob: hello\n```\n"
+			html, err := markdown.Render([]byte(source))
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			if !strings.Contains(html, `<div class="plantuml">`) {
+				t.Errorf("html = %q, want a plantuml placeholder div", html)
+			}
+			if !strings.Contains(html, "Alice -&gt; Bob: hello") {
+				t.Errorf("html = %q, want it to contain the raw (escaped) plantuml source", html)
+			}
+			if strings.Contains(html, "<svg") || strings.Contains(html, "chroma") {
+				t.Errorf("html = %q, plantuml source must not be highlighted or pre-rendered server-side", html)
+			}
+		})
+	}
+}
+
 func TestRender_BlockMathEmitsPlaceholderWithRawSource(t *testing.T) {
 	source := "$$\nx^2 + y^2 = z^2\n$$\n"
 	html, err := markdown.Render([]byte(source))

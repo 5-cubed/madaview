@@ -17,10 +17,10 @@ import (
 const chromaStyle = "github"
 
 // codeBlockRenderer overrides goldmark's default fenced-code-block
-// rendering. A "mermaid" fence bypasses highlighting entirely and instead
-// emits a placeholder div carrying its raw, escaped source for client-side
-// hydration (see the package doc comment). Every other fence is highlighted
-// server-side via chroma.
+// rendering. A "mermaid" fence, or a "plantuml"/"puml"/"uml" fence, bypasses
+// highlighting entirely and instead emits a placeholder div carrying its
+// raw, escaped source for client-side hydration (see the package doc
+// comment). Every other fence is highlighted server-side via chroma.
 type codeBlockRenderer struct{}
 
 func (r *codeBlockRenderer) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
@@ -51,12 +51,28 @@ func (r *codeBlockRenderer) render(w util.BufWriter, source []byte, n ast.Node, 
 		writeMermaidPlaceholder(w, code.Bytes())
 		return ast.WalkContinue, nil
 	}
+	if isPlantumlFence(language) {
+		writePlantumlPlaceholder(w, code.Bytes())
+		return ast.WalkContinue, nil
+	}
 	writeHighlightedCode(w, language, code.Bytes())
 	return ast.WalkContinue, nil
 }
 
 func writeMermaidPlaceholder(w util.BufWriter, code []byte) {
 	_, _ = w.WriteString(`<div class="mermaid">`)
+	_, _ = w.WriteString(gohtml.EscapeString(string(code)))
+	_, _ = w.WriteString("</div>\n")
+}
+
+// isPlantumlFence reports whether language is one of the recognized
+// PlantUML fence aliases: plantuml, puml, and uml all render identically.
+func isPlantumlFence(language string) bool {
+	return language == "plantuml" || language == "puml" || language == "uml"
+}
+
+func writePlantumlPlaceholder(w util.BufWriter, code []byte) {
+	_, _ = w.WriteString(`<div class="plantuml">`)
 	_, _ = w.WriteString(gohtml.EscapeString(string(code)))
 	_, _ = w.WriteString("</div>\n")
 }
