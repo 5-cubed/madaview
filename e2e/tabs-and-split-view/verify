@@ -1,0 +1,131 @@
+#!/usr/bin/env node
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { readResultJSON, report } from '../lib/harness.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+const resultDir = path.join(SCENARIO_DIR, 'result');
+
+const c = readResultJSON(resultDir, 'interactions.json');
+const consoleErrors = readResultJSON(resultDir, 'consoleErrors.json');
+
+const problems = [];
+const check = (condition, message) => {
+  if (!condition) problems.push(message);
+};
+
+// 0. No console errors (dev-only reducer invariant assertions would throw
+// as page errors; React errors would also land here).
+check(consoleErrors.length === 0, `console/page errors occurred: ${JSON.stringify(consoleErrors)}`);
+
+// 1. Open a.md and b.md via sidebar clicks -> 1 pane, 2 tabs.
+check(c.step1_openTwoTabs.paneCount === 1, 'step1: expected 1 pane');
+check(c.step1_openTwoTabs.panes[0]?.tabCount === 2, 'step1: expected 2 tabs in the pane');
+
+// 2. Scroll a.md down, switch to b.md, switch back -> scrollTop unchanged,
+// no new /api/file request fired.
+check(
+  c.step2_scrollPreservedNoRefetch.scrollTopAfterScroll > 0,
+  'step2: scroll did not actually move (test setup issue, scrollTopAfterScroll should be > 0)',
+);
+check(
+  c.step2_scrollPreservedNoRefetch.scrollTopAfterReturn ===
+    c.step2_scrollPreservedNoRefetch.scrollTopAfterScroll,
+  'step2: scrollTop changed after switching away and back to a.md',
+);
+check(
+  c.step2_scrollPreservedNoRefetch.apiFileRequestsAfter ===
+    c.step2_scrollPreservedNoRefetch.apiFileRequestsBefore,
+  'step2: switching between already-open tabs fired a new /api/file request',
+);
+
+// 3. Re-click a.md (already open) -> tab count still 2 (no dup).
+check(c.step3_reclickNoDuplicate.panes[0]?.tabCount === 2, 'step3: re-clicking an open tab created a duplicate');
+
+// 4. Split-right -> 2 panes, pane 2 has one tab duplicating the same path,
+// split-right icons absent in both panes.
+check(c.step4_splitRight.paneCount === 2, 'step4: split-right did not create a second pane');
+const step4Pane2 = c.step4_splitRight.panes.find((p) => p.tabCount === 1);
+check(!!step4Pane2, 'step4: expected the new pane to have exactly one tab');
+check(step4Pane2?.focused === true, 'step4: the newly split pane should become focused');
+check(c.step4_splitRight.splitRightIconCount === 0, 'step4: split-right icon still present after 2 panes exist');
+
+// 5. With pane 2 focused, click c.md -> opens in pane 2, not pane 1.
+const step5Panes = c.step5_sidebarTargetsFocusedPane.panes;
+const step5FocusedPane = step5Panes.find((p) => p.focused);
+check(step5FocusedPane?.tabCount === 2, 'step5: c.md did not open in the focused (pane 2) pane');
+const step5UnfocusedPane = step5Panes.find((p) => !p.focused);
+check(step5UnfocusedPane?.tabCount === 2, 'step5: pane 1 tab count changed when it should not have (from step2/3)');
+
+// 5b. Pane 2 still focused, b.md opened there too -> 3 tabs, gives
+// checkpoints 6/7 enough tabs to exercise non-active-close then
+// active-close distinctly.
+check(
+  c.step5b_openThirdTabInFocusedPane.panes.find((p) => p.focused)?.tabCount === 3,
+  'step5b: opening a third file in the focused pane did not result in 3 tabs there',
+);
+
+// 6. Close a non-active tab (within the already-focused pane) -> the
+// active tab id, URL, and scrollTop of the tab being viewed are unchanged.
+check(!c.step6_closeNonActiveTab.skipped, 'step6: no non-active tab found to close (test setup issue)');
+if (!c.step6_closeNonActiveTab.skipped) {
+  const after = c.step6_closeNonActiveTab.snapshotAfter;
+  const focusedAfter = after.panes.find((p) => p.focused);
+  check(
+    focusedAfter?.activeTabId === c.step6_closeNonActiveTab.activeTabIdBefore,
+    'step6: closing a non-active tab changed the active tab of the focused pane',
+  );
+  check(
+    after.pathname === c.step6_closeNonActiveTab.pathnameBefore,
+    'step6: closing a non-active tab changed the URL',
+  );
+  check(
+    c.step6_closeNonActiveTab.scrollAfterStep6 === c.step6_closeNonActiveTab.scrollBeforeStep6,
+    'step6: closing a non-active tab changed the scroll position of the tab being viewed',
+  );
+}
+
+// 7. Close the active tab -> the left-neighbor tab activates.
+check(!!c.step7_closeActiveTabActivatesNeighbor.closedTabId, 'step7: no active tab found to close (test setup issue)');
+check(
+  c.step7_closeActiveTabActivatesNeighbor.snapshotAfter.panes.some(
+    (p) => p.activeTabId && p.activeTabId !== c.step7_closeActiveTabActivatesNeighbor.closedTabId,
+  ),
+  'step7: no tab became active after closing the active tab',
+);
+
+// 8. Close the last tab in a pane -> that pane is gone, remaining pane is
+// full width (only one pane element in the DOM).
+check(c.step8_closeLastTabCollapsesPane.paneCount === 1, 'step8: closing the last tab in a pane did not collapse it');
+
+// 9. Navigate to /settings and back -> tabs/panes from steps 1-8 intact.
+check(
+  JSON.stringify(c.step9_settingsRoundTrip.before) === JSON.stringify(c.step9_settingsRoundTrip.after),
+  'step9: workspace state changed after a /settings round trip',
+);
+
+// 10. Reload the page -> exactly one pane with one tab matching the URL,
+// no crash, no restored multi-tab state.
+check(c.step10_reloadResets.paneCount === 1, 'step10: reload did not result in exactly one pane');
+check(
+  c.step10_reloadResets.panes[0]?.tabCount === 1,
+  'step10: reload restored more than one tab (persistence contract violated)',
+);
+
+// 11. history.back() after a fresh tab-open -> resets to a fresh
+// single-pane/single-tab workspace matching the landed-on URL (not a
+// restored 2-tab layout).
+check(
+  c.step11_backAfterFreshOpen.snapshotAfterBack.pathname === c.step11_backAfterFreshOpen.pathAtRootLoad,
+  'step11: history.back() did not land back on the original URL',
+);
+check(
+  c.step11_backAfterFreshOpen.snapshotAfterBack.paneCount <= 1,
+  'step11: history.back() restored more than one pane (historical multi-tab reconstruction)',
+);
+
+if (problems.length > 0) {
+  report('unexpected', `${problems.length} checkpoint(s) failed:\n- ${problems.join('\n- ')}`);
+} else {
+  report('good', 'all 11 tabs-and-split-view checkpoints passed');
+}
