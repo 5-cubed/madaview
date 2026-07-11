@@ -42,6 +42,100 @@ func TestList_SingleLevelListing(t *testing.T) {
 	}
 }
 
+func TestList_ExcludesNonMarkdownFiles(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "guide.md"), "# guide")
+	mustWrite(t, filepath.Join(root, ".env"), "SECRET=1")
+	mustWrite(t, filepath.Join(root, "package.json"), "{}")
+	mustWrite(t, filepath.Join(root, "image.png"), "not-a-real-png")
+
+	r, err := rootfs.New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	entries, err := r.List("")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	byName := map[string]rootfs.Entry{}
+	for _, e := range entries {
+		byName[e.Name] = e
+	}
+	if _, ok := byName["guide.md"]; !ok {
+		t.Errorf("guide.md missing from entries, want kept")
+	}
+	for _, excluded := range []string{".env", "package.json", "image.png"} {
+		if _, ok := byName[excluded]; ok {
+			t.Errorf("%s present in entries, want excluded (non-markdown)", excluded)
+		}
+	}
+}
+
+func TestList_KeepsMarkdownCaseInsensitively(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "README.MD"), "# readme")
+
+	r, err := rootfs.New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	entries, err := r.List("")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	if len(entries) != 1 || entries[0].Name != "README.MD" {
+		t.Errorf("entries = %+v, want [README.MD] (case-insensitive match)", entries)
+	}
+}
+
+func TestList_ExcludesDeadEndDirectories(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "guide.md"), "# guide")
+	mustMkdir(t, filepath.Join(root, "empty-assets"))
+	mustWrite(t, filepath.Join(root, "empty-assets", "image.png"), "not-a-real-png")
+
+	r, err := rootfs.New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	entries, err := r.List("")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	byName := map[string]rootfs.Entry{}
+	for _, e := range entries {
+		byName[e.Name] = e
+	}
+	if _, ok := byName["guide.md"]; !ok {
+		t.Errorf("guide.md missing from entries, want kept")
+	}
+	if _, ok := byName["empty-assets"]; ok {
+		t.Errorf("empty-assets present in entries, want excluded (no markdown in subtree)")
+	}
+}
+
+func TestList_KeepsDirectoryWithDeeplyNestedMarkdown(t *testing.T) {
+	root := t.TempDir()
+	mustMkdir(t, filepath.Join(root, "deeply", "nested", "dir"))
+	mustWrite(t, filepath.Join(root, "deeply", "nested", "dir", "deep.md"), "# deep")
+
+	r, err := rootfs.New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	entries, err := r.List("")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	if len(entries) != 1 || entries[0].Name != "deeply" || !entries[0].IsDir {
+		t.Errorf("entries = %+v, want [deeply (dir)] (multi-level recursion must reach deep.md)", entries)
+	}
+}
+
 func TestList_RejectsListingAFile(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, "guide.md"), "# guide")

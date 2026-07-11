@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/5-cubed/madaview/internal/rootfs"
 )
@@ -39,5 +40,46 @@ func TestResolve_FollowsSymlinkPhysicallyUnderRoot(t *testing.T) {
 	}
 	if string(content) != "outside content" {
 		t.Errorf("content = %q, want %q", content, "outside content")
+	}
+}
+
+// TestList_SymlinkCycleDoesNotHang verifies the subtree-markdown dead-end
+// check's cycle guard: a symlink pointing back to one of its own ancestor
+// directories must not cause List to recurse forever.
+func TestList_SymlinkCycleDoesNotHang(t *testing.T) {
+	root := t.TempDir()
+	cycleDir := filepath.Join(root, "cycle")
+	if err := os.MkdirAll(cycleDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	link := filepath.Join(cycleDir, "link")
+	if err := os.Symlink(cycleDir, link); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	r, err := rootfs.New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done := make(chan struct{})
+	var entries []rootfs.Entry
+	var listErr error
+	go func() {
+		entries, listErr = r.List("")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("List did not return within 5s; symlink cycle guard likely failed")
+	}
+
+	if listErr != nil {
+		t.Fatalf("List: %v", listErr)
+	}
+	if len(entries) != 0 {
+		t.Errorf("entries = %+v, want none (cycle dir has no markdown anywhere)", entries)
 	}
 }

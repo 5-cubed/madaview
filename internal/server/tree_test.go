@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/5-cubed/madaview/internal/rootfs"
@@ -18,6 +19,11 @@ func TestTree_ListsSingleLevel(t *testing.T) {
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
+	}
+	// docs/ must contain markdown to legitimately survive the
+	// subtree-markdown dead-end filter.
+	if err := os.WriteFile(filepath.Join(dir, "docs", "nested.md"), []byte("# nested"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
 	}
 	s := newTestServer(t, root, rootfs.SourceDefault)
 
@@ -38,6 +44,40 @@ func TestTree_ListsSingleLevel(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("len(entries) = %d, want 2 (got %+v)", len(got), got)
+	}
+}
+
+func TestTree_ExcludedNamesNeverAppearInPayload(t *testing.T) {
+	root, dir := newTestRoot(t)
+	if err := os.WriteFile(filepath.Join(dir, "guide.md"), []byte("# guide"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("SECRET=1"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "empty-assets"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "empty-assets", "image.png"), []byte("not-a-real-png"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	s := newTestServer(t, root, rootfs.SourceDefault)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/tree?path=", nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (body: %s)", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, excluded := range []string{".env", "package.json", "image.png", "empty-assets"} {
+		if strings.Contains(body, excluded) {
+			t.Errorf("response body contains excluded name %q; want never shipped over the wire (body: %s)", excluded, body)
+		}
 	}
 }
 
