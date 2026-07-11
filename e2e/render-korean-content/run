@@ -66,11 +66,31 @@ async function main() {
       // Expand the Korean-named folder in the sidebar and click into the
       // Korean-named nested file.
       await page.locator('nav button', { hasText: '문서' }).click();
-      await page.locator('nav a', { hasText: '안내.md' }).click();
-      await page.waitForFunction(() => document.querySelector('article h1')?.textContent.trim() === '안내 문서');
+      await page.locator('nav button', { hasText: '안내.md' }).click();
 
-      const nestedDom = await page.locator('article').innerHTML();
-      const nestedTitle = await page.locator('article h1').innerText();
+      // Each opened tab's ContentPane stays mounted (only display-toggled),
+      // so after this click there are two <article> elements in the DOM --
+      // the original fixture.md tab (hidden) and the new one. Scope to the
+      // visible <main> the same way e2e/tabs-and-split-view/run does.
+      await page.waitForFunction(() => {
+        const el = (() => {
+          const mains = Array.from(document.querySelectorAll('main'));
+          const visible = mains.find((m) => getComputedStyle(m).display !== 'none');
+          return visible?.querySelector('article') ?? null;
+        })();
+        return el?.querySelector('h1')?.textContent.trim() === '안내 문서';
+      });
+
+      const nestedDom = await page.evaluate(() => {
+        const mains = Array.from(document.querySelectorAll('main'));
+        const visible = mains.find((m) => getComputedStyle(m).display !== 'none');
+        return visible?.querySelector('article')?.innerHTML ?? '';
+      });
+      const nestedTitle = await page.evaluate(() => {
+        const mains = Array.from(document.querySelectorAll('main'));
+        const visible = mains.find((m) => getComputedStyle(m).display !== 'none');
+        return visible?.querySelector('article h1')?.innerText ?? '';
+      });
 
       await writeText(resultDir, 'dom.html', fixtureDom);
       await writeText(resultDir, 'nested-dom.html', nestedDom);
