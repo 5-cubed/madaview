@@ -1,0 +1,39 @@
+#!/usr/bin/env node
+// Scenario: sidebar-tree-markdown-only-filter
+// /api/tree must return only markdown files and directories whose subtree
+// contains markdown somewhere below them; non-markdown filenames and
+// dead-end directories must never appear anywhere in the raw response body.
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { resetResultDir, startServer, nextPort, writeMetadata, writeJSON, writeText } from '../lib/harness.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+async function main() {
+  const resultDir = await resetResultDir(SCENARIO_DIR);
+  const root = path.join(SCENARIO_DIR, 'data', 'root');
+  const port = nextPort();
+
+  const server = await startServer({ root, port });
+  const responses = {};
+  try {
+    for (const reqPath of ['', 'docs']) {
+      const url = `http://localhost:${port}/api/tree?path=${encodeURIComponent(reqPath)}`;
+      const res = await fetch(url);
+      const body = await res.text();
+      responses[reqPath === '' ? 'root' : reqPath] = { status: res.status, body };
+    }
+  } finally {
+    await writeText(resultDir, 'server.log', server.getLogs());
+    await server.stop();
+  }
+
+  await writeJSON(resultDir, 'responses.json', responses);
+  await writeMetadata(resultDir, { scenario: 'sidebar-tree-markdown-only-filter', root, port });
+  console.log(`run complete: ${resultDir}`);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

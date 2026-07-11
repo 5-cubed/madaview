@@ -1,0 +1,42 @@
+#!/usr/bin/env node
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { report, readResultJSON } from '../lib/harness.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+const resultDir = path.join(SCENARIO_DIR, 'result');
+
+const responses = readResultJSON(resultDir, 'responses.json');
+const EXCLUDED = ['.env', 'package.json', 'image.png', 'empty-assets'];
+
+const failures = [];
+
+function namesOf(body) {
+  return JSON.parse(body).map((e) => e.name);
+}
+
+const rootNames = namesOf(responses.root.body).sort();
+const wantRootNames = ['README.MD', 'deeply', 'docs', 'guide.md'].sort();
+if (JSON.stringify(rootNames) !== JSON.stringify(wantRootNames)) {
+  failures.push(`root entries = ${JSON.stringify(rootNames)}, want ${JSON.stringify(wantRootNames)}`);
+}
+
+const docsNames = namesOf(responses.docs.body).sort();
+const wantDocsNames = ['nested.md'];
+if (JSON.stringify(docsNames) !== JSON.stringify(wantDocsNames)) {
+  failures.push(`docs entries = ${JSON.stringify(docsNames)}, want ${JSON.stringify(wantDocsNames)}`);
+}
+
+for (const [key, { body }] of Object.entries(responses)) {
+  for (const excluded of EXCLUDED) {
+    if (body.includes(excluded)) {
+      failures.push(`${key} response body contains excluded name "${excluded}"`);
+    }
+  }
+}
+
+if (failures.length > 0) {
+  report('unexpected', `${failures.length} mismatch(es): ${JSON.stringify(failures)}. See ${resultDir}/responses.json`);
+} else {
+  report('good', 'root and docs listings contain only markdown files/non-dead-end dirs; excluded names never appear in either response body');
+}
