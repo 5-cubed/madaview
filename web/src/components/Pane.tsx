@@ -24,9 +24,7 @@ export function Pane({
       data-focused={focused}
       onMouseDown={() => focusPane(pane.id)}
       className={`flex h-full min-w-0 flex-1 flex-col border-2 ${
-        focused
-          ? 'border-blue-400 dark:border-blue-600'
-          : 'border-transparent'
+        focused ? 'border-[var(--accent)]' : 'border-transparent'
       }`}
     >
       <TabStrip

@@ -24,7 +24,7 @@ export function TabStrip({
   return (
     <div
       data-pane-id={paneId}
-      className="flex shrink-0 overflow-x-auto border-b border-neutral-200 dark:border-neutral-800"
+      className="flex shrink-0 overflow-x-auto border-b border-[var(--border)]"
     >
       {tabs.map((tab) => {
         const isActive = tab.id === activeTabId
@@ -35,10 +35,10 @@ export function TabStrip({
             data-tab-id={tab.id}
             data-active={isActive}
             onClick={() => onFocusTab(tab.id)}
-            className={`group flex shrink-0 cursor-pointer items-center gap-1 border-r border-neutral-200 px-3 py-1.5 text-sm dark:border-neutral-800 ${
+            className={`group flex shrink-0 cursor-pointer items-center gap-1 border-r border-[var(--border)] px-3 py-1.5 text-sm ${
               isActive
-                ? 'bg-white dark:bg-neutral-900'
-                : 'bg-neutral-50 text-neutral-500 dark:bg-neutral-950 dark:text-neutral-400'
+                ? 'bg-[var(--bg)] text-[var(--text)]'
+                : 'bg-[var(--bg-subtle)] text-[var(--text-muted)]'
             }`}
           >
             <span className="max-w-[12rem] truncate">{basename}</span>
@@ -51,7 +51,7 @@ export function TabStrip({
                   e.stopPropagation()
                   onSplitRight(tab.id)
                 }}
-                className="rounded px-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+                className="rounded px-1 text-[var(--text-muted)] hover:bg-[var(--bg-subtle)] hover:text-[var(--text)]"
               >
                 ⫽
               </button>
@@ -64,7 +64,7 @@ export function TabStrip({
                 e.stopPropagation()
                 onCloseTab(tab.id)
               }}
-              className="rounded px-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+              className="rounded px-1 text-[var(--text-muted)] hover:bg-[var(--bg-subtle)] hover:text-[var(--text)]"
             >
               ×
             </button>

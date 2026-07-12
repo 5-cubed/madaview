@@ -70,7 +70,7 @@ export function ContentPane({ path, visible }: { path: string; visible: boolean 
     <main className="flex-1 overflow-y-auto p-6" style={rootStyle}>
       <article
         ref={containerRef}
-        className="prose max-w-none dark:prose-invert"
+        className="prose max-w-none"
         // The HTML here is sanitized server-side (bluemonday) before it
         // ever reaches the client — see internal/markdown/sanitize.go.
         dangerouslySetInnerHTML={{ __html: file.html }}

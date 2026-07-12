@@ -11,12 +11,12 @@ function App() {
           Routes) — not just the /view routes — so tab/pane state survives
           a /settings round-trip. Only an actual page reload resets it. */}
       <WorkspaceProvider>
-        <div className="flex h-full flex-col">
-          <header className="flex items-center justify-between border-b border-neutral-200 px-4 py-2 dark:border-neutral-800">
+        <div className="flex h-full flex-col bg-[var(--bg)] text-[var(--text)]">
+          <header className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--bg)] px-4 py-2 text-[var(--text)]">
             <span className="font-medium">madaview</span>
             <Link
               to="/settings"
-              className="text-sm text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
+              className="text-sm text-[var(--text-muted)] hover:text-[var(--text)]"
             >
               Settings
             </Link>

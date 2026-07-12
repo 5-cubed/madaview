@@ -45,7 +45,7 @@ export function PaneDivider({
       onMouseDown={() => {
         draggingRef.current = true
       }}
-      className="w-1 shrink-0 cursor-col-resize bg-neutral-200 hover:bg-blue-400 dark:bg-neutral-800 dark:hover:bg-blue-600"
+      className="w-1 shrink-0 cursor-col-resize bg-[var(--border)] hover:bg-[var(--accent)]"
     />
   )
 }
