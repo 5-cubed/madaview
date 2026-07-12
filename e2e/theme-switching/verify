@@ -1,0 +1,117 @@
+#!/usr/bin/env node
+// Verifies result/computed-styles.json, result/interaction.json, and
+// result/crossCheck.json from the last `run`: every themed surface must
+// actually change color across all 6 themes, no Chroma token may be left
+// at the pre-fix unstyled-black regression color, clicking a theme button
+// must never touch the server, the tabs-and-split-view contract (tab/pane/
+// scroll state) must survive cycling through every theme via the
+// ThemePicker, and the last-selected theme must survive a reload.
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { readResultJSON, report } from '../lib/harness.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+const resultDir = path.join(SCENARIO_DIR, 'result');
+
+const styles = readResultJSON(resultDir, 'computed-styles.json');
+const interaction = readResultJSON(resultDir, 'interaction.json');
+const crossCheck = readResultJSON(resultDir, 'crossCheck.json');
+const consoleErrors = readResultJSON(resultDir, 'consoleErrors.json');
+
+const problems = [];
+const check = (condition, message) => {
+  if (!condition) problems.push(message);
+};
+
+const themeIds = Object.keys(styles);
+check(themeIds.length === 6, `expected 6 themes recorded in computed-styles.json, got ${themeIds.length}`);
+check(
+  Object.keys(interaction).length === 6,
+  `expected 6 themes recorded in interaction.json, got ${Object.keys(interaction).length}`,
+);
+
+check(consoleErrors.length === 0, `console/page errors occurred: ${JSON.stringify(consoleErrors)}`);
+
+// The unstyled-black regression color Chroma tokens rendered as before
+// this feature supplied any CSS for them.
+const UNSTYLED_BLACK = 'rgb(0, 0, 0)';
+
+const SURFACES = ['h1', 'h6', 'chromaKeyword', 'chromaString', 'tabStrip', 'sidebar', 'headerBar'];
+
+// 1. Every surface's computed color must actually differ across all 6
+// themes pairwise -- a surface stuck on one color across every theme is
+// the "partial/inconsistent switch" failure.
+for (const surface of SURFACES) {
+  const values = themeIds.map((id) => styles[id][surface]);
+  check(values.every((v) => v != null), `${surface}: missing computed value for one or more themes`);
+  const distinct = new Set(values);
+  check(
+    distinct.size === themeIds.length,
+    `${surface}: expected all ${themeIds.length} themes to differ, only ${distinct.size} distinct color(s) seen (${JSON.stringify(values)})`,
+  );
+}
+
+// Settings' own themed surface (read during the interaction pass) must
+// also differ across all 6 themes.
+const settingsValues = themeIds.map((id) => interaction[id].settingsColor);
+check(settingsValues.every((v) => v != null), 'settings: missing computed border color for one or more themes');
+check(
+  new Set(settingsValues).size === themeIds.length,
+  `settings: expected all ${themeIds.length} themes to differ, only ${new Set(settingsValues).size} distinct color(s) seen (${JSON.stringify(settingsValues)})`,
+);
+
+// 2. No keyword/string Chroma token may ever equal the unstyled-black
+// regression color.
+for (const id of themeIds) {
+  check(styles[id].chromaKeyword !== UNSTYLED_BLACK, `${id}: chroma keyword token still renders unstyled black`);
+  check(styles[id].chromaString !== UNSTYLED_BLACK, `${id}: chroma string token still renders unstyled black`);
+}
+
+// 3. The preview swatch reflected the hovered theme before commit, and
+// both the committed data-theme attribute and localStorage matched the
+// clicked theme immediately after commit (no round-trip needed).
+for (const id of Object.keys(interaction)) {
+  const rec = interaction[id];
+  check(rec.previewSwatchTheme === id, `${id}: preview swatch did not show the hovered theme before commit`);
+  check(rec.committedAttr === id, `${id}: document.documentElement data-theme did not match the clicked theme`);
+  check(rec.storedTheme === id, `${id}: localStorage theme did not match the clicked theme`);
+}
+
+// 4. Zero network delta: clicking a theme button must never fire an
+// /api/* call, for any of the 6 themes.
+for (const id of Object.keys(interaction)) {
+  check(interaction[id].apiRequestDelta === 0, `${id}: clicking this theme fired ${interaction[id].apiRequestDelta} /api/* request(s)`);
+}
+
+// 5. Tabs-and-split-view cross-check: pane/tab/scroll state opened before
+// cycling themes (while staying on /view/*, no Settings round trip) must
+// be byte-identical after cycling through all 6, and cycling themes this
+// way must fire zero additional /api/* requests either.
+check(
+  JSON.stringify(crossCheck.beforeSwitching) === JSON.stringify(crossCheck.afterSwitching),
+  `tab/pane/scroll state changed after cycling themes: before=${JSON.stringify(crossCheck.beforeSwitching)} after=${JSON.stringify(crossCheck.afterSwitching)}`,
+);
+check(crossCheck.beforeSwitching.scrollTop > 0, 'test setup issue: scrollTop was not actually moved before switching');
+check(
+  crossCheck.apiRequestsAfterThemeLoop === crossCheck.apiRequestsBeforeThemeLoop,
+  `cycling themes while on /view/* fired ${crossCheck.apiRequestsAfterThemeLoop - crossCheck.apiRequestsBeforeThemeLoop} /api/* request(s)`,
+);
+
+// 6. Persistence: the last-selected theme survives a reload.
+check(
+  crossCheck.afterReload.dataTheme === crossCheck.lastTheme,
+  `reload did not preserve the applied data-theme (expected ${crossCheck.lastTheme}, got ${crossCheck.afterReload.dataTheme})`,
+);
+check(
+  crossCheck.afterReload.storedTheme === crossCheck.lastTheme,
+  `reload did not preserve localStorage theme (expected ${crossCheck.lastTheme}, got ${crossCheck.afterReload.storedTheme})`,
+);
+
+if (problems.length > 0) {
+  report('unexpected', `${problems.length} check(s) failed:\n- ${problems.join('\n- ')}`);
+} else {
+  report(
+    'good',
+    'all theme-switching checks passed: 8 distinct-per-theme surfaces (including Settings), no unstyled Chroma tokens, zero network delta per click, tab/scroll state preserved across cycling, theme persists across reload',
+  );
+}

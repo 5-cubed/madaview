@@ -1,0 +1,218 @@
+#!/usr/bin/env node
+// Scenario: theme-switching
+// Drives the ThemePicker in Settings through all 6 themes (see
+// .context/adr/20260712-221004-md-rendering-theme.md), capturing computed
+// colors per surface per theme, plus cross-checks that clicking a theme
+// button never touches the server (no /api/* calls), that cycling through
+// every theme leaves the tabs-and-split-view "kept mounted" contract
+// (tab count / active tab / scrollTop) untouched, and that the
+// last-selected theme survives a reload.
+//
+// Three passes, deliberately kept separate so no check contaminates
+// another:
+//   Pass A (interaction): drives the real UI -- hover for preview, click
+//     to commit -- for every theme, on the Settings page. Request-delta is
+//     measured tightly around each click itself (immediately before/after,
+//     with no navigation in between), isolating "does applying a theme
+//     call the server" from "does navigating between /view and /settings
+//     call the server" (the latter is real, pre-existing, orthogonal
+//     Workspace route-remount behavior this feature does not change and
+//     that scroll/tab-count is not expected to survive -- matching
+//     tabs-and-split-view's own step9, which only compares pane/tab
+//     structure across a Settings round trip, never scrollTop).
+//   Pass B (colors): applies each theme directly (document.dataset.theme,
+//     exactly what applyTheme's DOM mutation does) on a single /view/*
+//     load per theme, reading every themed surface's computed color
+//     without any Settings round-trip -- isolating "does the CSS cascade
+//     actually recolor every surface" from navigation-induced churn.
+//   Pass C (scroll/tab preservation): applies a theme directly, while
+//     staying on /view/* the whole time (no Settings round trip) -- this
+//     is the actual claim under test ("theme switching is pure CSS, never
+//     touches Workspace/ContentPane state"), isolated from the unrelated,
+//     pre-existing fact that navigating to Settings unmounts Workspace.
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { resetResultDir, startServer, nextPort, writeMetadata, writeJSON, writeText } from '../lib/harness.mjs';
+import { withPage } from '../lib/browser.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+const THEME_IDS = ['github-light', 'github-dark', 'kanagawa', 'gruvbox', 'solarized-light', 'one-dark'];
+
+function countApiRequests(requests) {
+  return requests.filter((u) => u.includes('/api/')).length;
+}
+
+// `<main>` is the actual scroll container (overflow-y-auto), not
+// `<article>` -- matches the tabs-and-split-view scenario's own
+// convention (see e2e/tabs-and-split-view/run's scrollTopOfVisibleMain).
+const visibleMainScrollTop = (page) =>
+  page.evaluate(() => {
+    const mains = Array.from(document.querySelectorAll('main'));
+    const visible = mains.find((m) => getComputedStyle(m).display !== 'none');
+    return visible ? visible.scrollTop : null;
+  });
+
+const workspaceSnapshot = async (page) => {
+  const scrollTop = await visibleMainScrollTop(page);
+  return page.evaluate((scrollTop) => {
+    const paneEls = Array.from(document.querySelectorAll('[data-pane-root]'));
+    const tabCounts = paneEls.map((p) => p.querySelectorAll('[data-tab-id]').length);
+    const activeTabIds = paneEls.map(
+      (p) => p.querySelector('[data-active="true"]')?.getAttribute('data-tab-id') ?? null,
+    );
+    return { paneCount: paneEls.length, tabCounts, activeTabIds, scrollTop };
+  }, scrollTop);
+};
+
+// Reads getComputedStyle(...).color/backgroundColor for every themed
+// surface: markdown headers + Chroma tokens (article), tab strip, sidebar,
+// header bar (all visible on /view/*).
+async function readViewerColors(page) {
+  return page.evaluate(() => {
+    const colorOf = (el) => (el ? getComputedStyle(el).color : null);
+    const bgOf = (el) => (el ? getComputedStyle(el).backgroundColor : null);
+    const article = document.querySelector('main article');
+    const activeTab = document.querySelector('[data-tab-id][data-active="true"]');
+    return {
+      h1: colorOf(article?.querySelector('h1') ?? null),
+      h6: colorOf(article?.querySelector('h6') ?? null),
+      chromaKeyword: colorOf(article?.querySelector('.chroma [class^="k"]') ?? null),
+      chromaString: colorOf(article?.querySelector('.chroma [class^="s"]') ?? null),
+      tabStrip: bgOf(activeTab),
+      sidebar: bgOf(document.querySelector('nav')),
+      headerBar: bgOf(document.querySelector('header')),
+    };
+  });
+}
+
+// Reads a themed color from the Settings page itself: the root-folder
+// input's border, a --border token consumer only present on /settings.
+async function readSettingsColor(page) {
+  return page.evaluate(() => {
+    const input = document.querySelector('input[placeholder="Root folder path"]');
+    return input ? getComputedStyle(input).borderColor : null;
+  });
+}
+
+async function main() {
+  const resultDir = await resetResultDir(SCENARIO_DIR);
+  const root = path.join(SCENARIO_DIR, 'data');
+  const port = nextPort();
+
+  const server = await startServer({ root, port });
+  const computedStyles = {};
+  const interaction = {};
+  const consoleErrors = [];
+
+  try {
+    await withPage(async (page, requests) => {
+      page.on('console', (msg) => {
+        if (msg.type() === 'error') consoleErrors.push(msg.text());
+      });
+      page.on('pageerror', (err) => consoleErrors.push(String(err)));
+
+      // --- Pass A: interaction + request-delta, on Settings ---
+      await page.goto(`http://localhost:${port}/view/fixture.md`);
+      await page.waitForSelector('main article', { timeout: 5000 });
+      await page.locator('a', { hasText: 'Settings' }).click();
+      await page.waitForSelector('[data-theme-id]', { timeout: 5000 });
+
+      for (const themeId of THEME_IDS) {
+        const button = page.locator(`[data-theme-id="${themeId}"]`);
+        await button.hover();
+        await page.waitForTimeout(50);
+        const previewSwatchTheme = await page
+          .locator('[data-testid="theme-preview-swatch"]')
+          .getAttribute('data-theme');
+
+        const apiCountBeforeClick = countApiRequests(requests);
+        await button.click();
+        await page.waitForTimeout(100);
+        const apiRequestDelta = countApiRequests(requests) - apiCountBeforeClick;
+
+        const committedAttr = await page.evaluate(() => document.documentElement.dataset.theme);
+        const storedTheme = await page.evaluate(() => localStorage.getItem('madaview:theme'));
+        const settingsColor = await readSettingsColor(page);
+
+        interaction[themeId] = { previewSwatchTheme, committedAttr, storedTheme, settingsColor, apiRequestDelta };
+      }
+
+      // Reload (still on /settings) and assert the last-selected theme
+      // persisted.
+      await page.reload();
+      await page.waitForTimeout(200);
+      const afterReload = await page.evaluate(() => ({
+        dataTheme: document.documentElement.dataset.theme,
+        storedTheme: localStorage.getItem('madaview:theme'),
+      }));
+
+      // --- Pass B: per-theme computed colors across every surface ---
+      // One fresh /view/* load per theme, applying the theme directly
+      // (exactly what applyTheme's DOM mutation does) before reading --
+      // isolates "does the cascade recolor every surface" from any
+      // Settings round-trip or ThemePicker interaction noise.
+      for (const themeId of THEME_IDS) {
+        await page.goto(`http://localhost:${port}/view/fixture.md`);
+        await page.waitForSelector('main article', { timeout: 5000 });
+        await page.evaluate((id) => {
+          document.documentElement.dataset.theme = id;
+        }, themeId);
+        const colors = await readViewerColors(page);
+        computedStyles[themeId] = colors;
+      }
+
+      // --- Pass C: scroll/tab preservation while staying on /view/* ---
+      // Open a second tab (split-right) and scroll the first tab's
+      // content, then apply every theme directly (no Settings round trip,
+      // no navigation at all) -- this is the actual claim under test: a
+      // theme switch is a pure CSS-cascade change that never touches
+      // Workspace/ContentPane state.
+      await page.goto(`http://localhost:${port}/view/fixture.md`);
+      await page.waitForSelector('main article', { timeout: 5000 });
+      await page.locator('[data-action="split-right"]').first().click();
+      await page.waitForTimeout(150);
+      await page.evaluate(() => {
+        const mains = Array.from(document.querySelectorAll('main'));
+        const visible = mains.find((m) => getComputedStyle(m).display !== 'none');
+        if (visible) visible.scrollTop = 500;
+      });
+
+      const beforeSwitching = await workspaceSnapshot(page);
+      const apiRequestsBeforeThemeLoop = countApiRequests(requests);
+
+      for (const themeId of THEME_IDS) {
+        await page.evaluate((id) => {
+          document.documentElement.dataset.theme = id;
+        }, themeId);
+        await page.waitForTimeout(20);
+      }
+
+      const afterSwitching = await workspaceSnapshot(page);
+      const apiRequestsAfterThemeLoop = countApiRequests(requests);
+
+      await writeJSON(resultDir, 'requests.json', requests);
+      await writeJSON(resultDir, 'crossCheck.json', {
+        beforeSwitching,
+        afterSwitching,
+        apiRequestsBeforeThemeLoop,
+        apiRequestsAfterThemeLoop,
+        afterReload,
+        lastTheme: THEME_IDS[THEME_IDS.length - 1],
+      });
+      await writeJSON(resultDir, 'interaction.json', interaction);
+    });
+  } finally {
+    await writeText(resultDir, 'server.log', server.getLogs());
+    await server.stop();
+  }
+
+  await writeJSON(resultDir, 'consoleErrors.json', consoleErrors);
+  await writeJSON(resultDir, 'computed-styles.json', computedStyles);
+  await writeMetadata(resultDir, { scenario: 'theme-switching', root, port, themes: THEME_IDS });
+  console.log(`run complete: ${resultDir}`);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

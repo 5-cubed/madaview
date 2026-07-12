@@ -5,7 +5,7 @@ import type { TreeEntry } from '../types'
 
 export function Sidebar() {
   return (
-    <nav className="w-64 shrink-0 overflow-y-auto border-r border-neutral-200 p-3 dark:border-neutral-800">
+    <nav className="w-64 shrink-0 overflow-y-auto border-r border-[var(--border)] bg-[var(--bg)] p-3 text-[var(--text)]">
       <TreeLevel path="" />
     </nav>
   )
@@ -55,7 +55,7 @@ function TreeNode({ entry }: { entry: TreeEntry }) {
         <button
           type="button"
           onClick={() => openFile(entry.path)}
-          className="block w-full rounded px-2 py-1 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          className="block w-full rounded px-2 py-1 text-left hover:bg-[var(--bg-subtle)]"
         >
           {entry.name}
         </button>
@@ -68,12 +68,12 @@ function TreeNode({ entry }: { entry: TreeEntry }) {
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="block w-full rounded px-2 py-1 text-left text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800"
+        className="block w-full rounded px-2 py-1 text-left text-[var(--text-muted)] hover:bg-[var(--bg-subtle)]"
       >
         {expanded ? '▾' : '▸'} {entry.name}/
       </button>
       {expanded && (
-        <div className="ml-3 border-l border-neutral-200 pl-2 dark:border-neutral-800">
+        <div className="ml-3 border-l border-[var(--border)] pl-2">
           <TreeLevel path={entry.path} />
         </div>
       )}
