@@ -1,0 +1,258 @@
+/* Theme token registry.
+ *
+ * Each theme is a self-contained `[data-theme="id"]` block of CSS custom
+ * properties. Applying a theme is exactly one DOM mutation
+ * (`document.documentElement.dataset.theme = id`, see theme.ts) — the
+ * cascade re-colors every surface below with zero React re-render.
+ *
+ * Two token families (see .context/adr/20260712-221004-md-rendering-theme.md):
+ *   - Chrome tokens (--bg, --bg-subtle, --border, --text, --text-muted,
+ *     --accent): header bar, sidebar, tab strip, divider, Settings.
+ *   - Markdown-content tokens (--h1..--h6, --md-link, --code-*,
+ *     --chroma-*): the rendered article body, including Chroma's
+ *     class-based syntax-highlighting output (see the component rules at
+ *     the bottom of this file).
+ */
+
+[data-theme='github-light'] {
+  --bg: #ffffff;
+  --bg-subtle: #f6f8fa;
+  --border: #d0d7de;
+  --text: #1f2328;
+  --text-muted: #59636e;
+  --accent: #0969da;
+
+  --h1: #1f2328;
+  --h2: #1f2328;
+  --h3: #24292f;
+  --h4: #24292f;
+  --h5: #57606a;
+  --h6: #57606a;
+  --md-link: #0969da;
+
+  --code-bg: #f6f8fa;
+  --code-border: #d0d7de;
+  --chroma-fg: #1f2328;
+  --chroma-keyword: #cf222e;
+  --chroma-name: #953800;
+  --chroma-string: #0a3069;
+  --chroma-comment: #6e7781;
+  --chroma-number: #0550ae;
+  --chroma-operator: #cf222e;
+  --chroma-generic: #82071e;
+  --chroma-literal: #0550ae;
+}
+
+[data-theme='github-dark'] {
+  --bg: #0d1117;
+  --bg-subtle: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-muted: #8d96a0;
+  --accent: #4493f8;
+
+  --h1: #e6edf3;
+  --h2: #e6edf3;
+  --h3: #f0f6fc;
+  --h4: #f0f6fc;
+  --h5: #8d96a0;
+  --h6: #8d96a0;
+  --md-link: #4493f8;
+
+  --code-bg: #161b22;
+  --code-border: #30363d;
+  --chroma-fg: #e6edf3;
+  --chroma-keyword: #ff7b72;
+  --chroma-name: #ffa657;
+  --chroma-string: #a5d6ff;
+  --chroma-comment: #8b949e;
+  --chroma-number: #79c0ff;
+  --chroma-operator: #ff7b72;
+  --chroma-generic: #ffa198;
+  --chroma-literal: #79c0ff;
+}
+
+[data-theme='kanagawa'] {
+  --bg: #1f1f28;
+  --bg-subtle: #2a2a37;
+  --border: #54546d;
+  --text: #dcd7ba;
+  --text-muted: #9a9aad;
+  --accent: #7e9cd8;
+
+  --h1: #dcd7ba;
+  --h2: #c8c093;
+  --h3: #957fb8;
+  --h4: #a3d4d5;
+  --h5: #9a9aad;
+  --h6: #9a9aad;
+  --md-link: #7e9cd8;
+
+  --code-bg: #16161d;
+  --code-border: #54546d;
+  --chroma-fg: #dcd7ba;
+  --chroma-keyword: #957fb8;
+  --chroma-name: #7fb4ca;
+  --chroma-string: #98bb6c;
+  --chroma-comment: #727169;
+  --chroma-number: #d27e99;
+  --chroma-operator: #c0a36e;
+  --chroma-generic: #e46876;
+  --chroma-literal: #ffa066;
+}
+
+[data-theme='gruvbox'] {
+  --bg: #282828;
+  --bg-subtle: #32302f;
+  --border: #504945;
+  --text: #ebdbb2;
+  --text-muted: #a89984;
+  --accent: #fe8019;
+
+  --h1: #fbf1c7;
+  --h2: #fabd2f;
+  --h3: #b8bb26;
+  --h4: #8ec07c;
+  --h5: #a89984;
+  --h6: #a89984;
+  --md-link: #83a598;
+
+  --code-bg: #32302f;
+  --code-border: #504945;
+  --chroma-fg: #ebdbb2;
+  --chroma-keyword: #fb4934;
+  --chroma-name: #fabd2f;
+  --chroma-string: #b8bb26;
+  --chroma-comment: #928374;
+  --chroma-number: #d3869b;
+  --chroma-operator: #fe8019;
+  --chroma-generic: #fb4934;
+  --chroma-literal: #d3869b;
+}
+
+[data-theme='solarized-light'] {
+  --bg: #fdf6e3;
+  --bg-subtle: #eee8d5;
+  --border: #d3cbb7;
+  --text: #073642;
+  --text-muted: #657b83;
+  --accent: #268bd2;
+
+  --h1: #073642;
+  --h2: #073642;
+  --h3: #586e75;
+  --h4: #586e75;
+  --h5: #657b83;
+  --h6: #657b83;
+  --md-link: #268bd2;
+
+  --code-bg: #eee8d5;
+  --code-border: #d3cbb7;
+  --chroma-fg: #073642;
+  --chroma-keyword: #859900;
+  --chroma-name: #b58900;
+  --chroma-string: #2aa198;
+  --chroma-comment: #93a1a1;
+  --chroma-number: #d33682;
+  --chroma-operator: #cb4b16;
+  --chroma-generic: #dc322f;
+  --chroma-literal: #6c71c4;
+}
+
+[data-theme='one-dark'] {
+  --bg: #282c34;
+  --bg-subtle: #21252b;
+  --border: #3e4451;
+  --text: #abb2bf;
+  --text-muted: #5c6370;
+  --accent: #61afef;
+
+  --h1: #e5c07b;
+  --h2: #e5c07b;
+  --h3: #61afef;
+  --h4: #56b6c2;
+  --h5: #abb2bf;
+  --h6: #5c6370;
+  --md-link: #61afef;
+
+  --code-bg: #21252b;
+  --code-border: #3e4451;
+  --chroma-fg: #abb2bf;
+  --chroma-keyword: #c678dd;
+  --chroma-name: #61afef;
+  --chroma-string: #98c379;
+  --chroma-comment: #5c6370;
+  --chroma-number: #d19a66;
+  --chroma-operator: #56b6c2;
+  --chroma-generic: #e06c75;
+  --chroma-literal: #d19a66;
+}
+
+/* Theme-agnostic component rules — written once, consuming the tokens
+ * above. Adding/adjusting a palette never requires touching these. */
+
+.prose h1 {
+  color: var(--h1);
+}
+.prose h2 {
+  color: var(--h2);
+}
+.prose h3 {
+  color: var(--h3);
+}
+.prose h4 {
+  color: var(--h4);
+}
+.prose h5 {
+  color: var(--h5);
+}
+.prose h6 {
+  color: var(--h6);
+}
+.prose a {
+  color: var(--md-link);
+}
+
+/* Chroma emits ~80 distinct token classes (see codeblock.go /
+ * chroma-css-classes-never-styled), all following Pygments' short-code
+ * convention: the first letter names the category. Attribute-prefix
+ * selectors map every sub-class in a category to one variable, so this
+ * stays ~8 rules instead of ~80. `.chroma` itself supplies the fallback
+ * color for anything unmatched (e.g. `.w` whitespace spans), so no token
+ * is ever left at browser-default black. */
+.chroma {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: 0.375rem;
+  color: var(--chroma-fg);
+  display: block;
+  overflow-x: auto;
+  padding: 0.75rem 1rem;
+}
+.chroma [class^='k'] {
+  color: var(--chroma-keyword);
+}
+.chroma [class^='n'] {
+  color: var(--chroma-name);
+}
+.chroma [class^='s'] {
+  color: var(--chroma-string);
+}
+.chroma [class^='c'] {
+  color: var(--chroma-comment);
+}
+.chroma [class^='m'] {
+  color: var(--chroma-number);
+}
+.chroma [class^='o'] {
+  color: var(--chroma-operator);
+}
+.chroma [class^='g'] {
+  color: var(--chroma-generic);
+}
+.chroma [class^='l'] {
+  color: var(--chroma-literal);
+}
+.chroma .p {
+  color: var(--chroma-fg);
+}
