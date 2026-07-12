@@ -8,6 +8,12 @@
 // (tab count / active tab / scrollTop) untouched, and that the
 // last-selected theme survives a reload.
 //
+// Extended per .context/adr/20260712-233457-theme-contrast-hierarchy-fix.md
+// to also capture, per theme: resolved --h1..--h6/--text custom-property
+// values (for the heading-hierarchy exact-equality + contrast checks) and
+// resolved --tw-prose-* custom-property values plus computed colors on new
+// representative fixture elements (for the .prose sub-element WCAG checks).
+//
 // Three passes, deliberately kept separate so no check contaminates
 // another:
 //   Pass A (interaction): drives the real UI -- hover for preview, click
@@ -38,6 +44,29 @@ import { withPage } from '../lib/browser.mjs';
 const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
 const THEME_IDS = ['github-light', 'github-dark', 'kanagawa', 'gruvbox', 'solarized-light', 'one-dark'];
 
+// The full set of --tw-prose-* vars this fix wires to theme tokens (see
+// .context/adr/20260712-233457-theme-contrast-hierarchy-fix.md's mapping
+// table). --links/--kbd/--kbd-shadows/--lead are intentionally left unwired
+// and are not read here. --headings IS wired (unlike h1..h6 elements, which
+// are already covered by higher-specificity `.prose h1`..`.prose h6` rules,
+// `thead th` has no such override and falls straight through to this var).
+const WIRED_PROSE_VARS = [
+  'body',
+  'headings',
+  'bold',
+  'quotes',
+  'captions',
+  'code',
+  'pre-code',
+  'bullets',
+  'counters',
+  'hr',
+  'quote-borders',
+  'th-borders',
+  'td-borders',
+  'pre-bg',
+];
+
 function countApiRequests(requests) {
   return requests.filter((u) => u.includes('/api/')).length;
 }
@@ -66,13 +95,33 @@ const workspaceSnapshot = async (page) => {
 
 // Reads getComputedStyle(...).color/backgroundColor for every themed
 // surface: markdown headers + Chroma tokens (article), tab strip, sidebar,
-// header bar (all visible on /view/*).
+// header bar (all visible on /view/*); plus, for the contrast-hierarchy
+// fix: resolved --h1..--h6/--text custom-property values, resolved
+// --tw-prose-* custom-property values (the primary mechanical check for
+// the .prose wiring), and computed colors on representative new fixture
+// elements (bold, blockquote, list item, table header, table cell border,
+// hr) as a cascade/specificity sanity check.
 async function readViewerColors(page) {
-  return page.evaluate(() => {
+  return page.evaluate((wiredProseVars) => {
     const colorOf = (el) => (el ? getComputedStyle(el).color : null);
     const bgOf = (el) => (el ? getComputedStyle(el).backgroundColor : null);
+    const borderColorOf = (el) => (el ? getComputedStyle(el).borderColor : null);
     const article = document.querySelector('main article');
     const activeTab = document.querySelector('[data-tab-id][data-active="true"]');
+
+    const articleStyle = article ? getComputedStyle(article) : null;
+    const resolvedVar = (name) => (articleStyle ? articleStyle.getPropertyValue(name).trim() : null);
+
+    const headings = {};
+    for (const level of ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']) {
+      headings[level] = resolvedVar(`--${level}`);
+    }
+
+    const proseVars = {};
+    for (const varName of wiredProseVars) {
+      proseVars[varName] = resolvedVar(`--tw-prose-${varName}`);
+    }
+
     return {
       h1: colorOf(article?.querySelector('h1') ?? null),
       h6: colorOf(article?.querySelector('h6') ?? null),
@@ -81,8 +130,21 @@ async function readViewerColors(page) {
       tabStrip: bgOf(activeTab),
       sidebar: bgOf(document.querySelector('nav')),
       headerBar: bgOf(document.querySelector('header')),
+
+      resolvedText: resolvedVar('--text'),
+      resolvedBg: resolvedVar('--bg'),
+      headings,
+      proseVars,
+      representative: {
+        bold: colorOf(article?.querySelector('strong') ?? null),
+        blockquote: colorOf(article?.querySelector('blockquote') ?? null),
+        listItem: colorOf(article?.querySelector('ul li') ?? null),
+        tableHeader: colorOf(article?.querySelector('thead th') ?? null),
+        tableCellBorder: borderColorOf(article?.querySelector('td') ?? null),
+        hr: borderColorOf(article?.querySelector('hr') ?? null),
+      },
     };
-  });
+  }, WIRED_PROSE_VARS);
 }
 
 // Reads a themed color from the Settings page itself: the root-folder
