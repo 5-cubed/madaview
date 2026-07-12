@@ -6,9 +6,16 @@
 // must never touch the server, the tabs-and-split-view contract (tab/pane/
 // scroll state) must survive cycling through every theme via the
 // ThemePicker, and the last-selected theme must survive a reload.
+//
+// Extended per .context/adr/20260712-233457-theme-contrast-hierarchy-fix.md:
+// heading hierarchy (exact-equality + per-level 3:1 contrast), WCAG gates
+// on the --tw-prose-* vars wired to theme tokens, presence checks on the
+// vars wired but exempt from a WCAG gate, and distinctness checks on new
+// representative .prose sub-elements.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readResultJSON, report } from '../lib/harness.mjs';
+import { contrastRatio } from '../lib/contrast.mjs';
 
 const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
 const resultDir = path.join(SCENARIO_DIR, 'result');
@@ -38,6 +45,11 @@ const UNSTYLED_BLACK = 'rgb(0, 0, 0)';
 
 const SURFACES = ['h1', 'h6', 'chromaKeyword', 'chromaString', 'tabStrip', 'sidebar', 'headerBar'];
 
+// Representative .prose sub-elements added by the contrast-hierarchy fix
+// (bold, blockquote, list item, table cell border, hr) -- read from
+// styles[id].representative.*.
+const REPRESENTATIVE_SURFACES = ['bold', 'blockquote', 'listItem', 'tableHeader', 'tableCellBorder', 'hr'];
+
 // 1. Every surface's computed color must actually differ across all 6
 // themes pairwise -- a surface stuck on one color across every theme is
 // the "partial/inconsistent switch" failure.
@@ -48,6 +60,17 @@ for (const surface of SURFACES) {
   check(
     distinct.size === themeIds.length,
     `${surface}: expected all ${themeIds.length} themes to differ, only ${distinct.size} distinct color(s) seen (${JSON.stringify(values)})`,
+  );
+}
+
+// 1b. Same distinctness bar for the new representative .prose sub-elements.
+for (const surface of REPRESENTATIVE_SURFACES) {
+  const values = themeIds.map((id) => styles[id].representative?.[surface]);
+  check(values.every((v) => v != null), `representative.${surface}: missing computed value for one or more themes`);
+  const distinct = new Set(values);
+  check(
+    distinct.size === themeIds.length,
+    `representative.${surface}: expected all ${themeIds.length} themes to differ, only ${distinct.size} distinct color(s) seen (${JSON.stringify(values)})`,
   );
 }
 
@@ -107,11 +130,77 @@ check(
   `reload did not preserve localStorage theme (expected ${crossCheck.lastTheme}, got ${crossCheck.afterReload.storedTheme})`,
 );
 
+// --- Contrast-hierarchy fix checks (see
+// .context/adr/20260712-233457-theme-contrast-hierarchy-fix.md) ---
+
+const HEADING_LEVELS = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
+const TEXT_VARS = ['body', 'headings', 'bold', 'quotes', 'captions', 'code', 'pre-code'];
+const MARKER_VARS = ['bullets', 'counters'];
+const PRESENCE_ONLY_VARS = ['hr', 'quote-borders', 'th-borders', 'td-borders', 'pre-bg'];
+
+// 7. Heading hierarchy: per theme, h1..h6 and --text must be 6+1
+// pairwise-distinct values, and each heading level must independently
+// clear 3:1 contrast against that theme's --bg.
+for (const id of themeIds) {
+  const { headings, resolvedText, resolvedBg } = styles[id];
+  check(headings != null && resolvedText != null && resolvedBg != null, `${id}: missing headings/--text/--bg resolved values`);
+  if (!headings || !resolvedText || !resolvedBg) continue;
+
+  const allValues = [...HEADING_LEVELS.map((level) => headings[level]), resolvedText];
+  const distinct = new Set(allValues);
+  check(
+    distinct.size === allValues.length,
+    `${id}: heading hierarchy has a color collision -- h1..h6/--text are not all distinct (${JSON.stringify({ ...headings, text: resolvedText })})`,
+  );
+
+  for (const level of HEADING_LEVELS) {
+    const ratio = contrastRatio(headings[level], resolvedBg);
+    check(ratio >= 3, `${id}: ${level} (${headings[level]}) contrast ${ratio.toFixed(2)}:1 against --bg (${resolvedBg}) is below the 3:1 bar`);
+  }
+}
+
+// 8. WCAG text-var gate: body/bold/quotes/captions/code/pre-code must
+// clear 4.5:1 against --bg in every theme.
+for (const id of themeIds) {
+  const { proseVars, resolvedBg } = styles[id];
+  for (const varName of TEXT_VARS) {
+    const value = proseVars?.[varName];
+    check(value != null && value !== '', `${id}: --tw-prose-${varName} did not resolve to a value`);
+    if (!value) continue;
+    const ratio = contrastRatio(value, resolvedBg);
+    check(ratio >= 4.5, `${id}: --tw-prose-${varName} (${value}) contrast ${ratio.toFixed(2)}:1 against --bg is below the 4.5:1 bar`);
+  }
+}
+
+// 9. WCAG marker-var gate: bullets/counters must clear 3:1 against --bg in
+// every theme.
+for (const id of themeIds) {
+  const { proseVars, resolvedBg } = styles[id];
+  for (const varName of MARKER_VARS) {
+    const value = proseVars?.[varName];
+    check(value != null && value !== '', `${id}: --tw-prose-${varName} did not resolve to a value`);
+    if (!value) continue;
+    const ratio = contrastRatio(value, resolvedBg);
+    check(ratio >= 3, `${id}: --tw-prose-${varName} (${value}) contrast ${ratio.toFixed(2)}:1 against --bg is below the 3:1 bar`);
+  }
+}
+
+// 10. Presence-only check: hr/quote-borders/th-borders/td-borders/pre-bg
+// must be wired (non-null, non-empty) in every theme -- no WCAG ratio
+// gate, since these are hairlines/backgrounds, not rendered text.
+for (const id of themeIds) {
+  const { proseVars } = styles[id];
+  for (const varName of PRESENCE_ONLY_VARS) {
+    const value = proseVars?.[varName];
+    check(value != null && value !== '', `${id}: --tw-prose-${varName} did not resolve to a value`);
+  }
+}
+
 if (problems.length > 0) {
   report('unexpected', `${problems.length} check(s) failed:\n- ${problems.join('\n- ')}`);
 } else {
   report(
     'good',
-    'all theme-switching checks passed: 8 distinct-per-theme surfaces (including Settings), no unstyled Chroma tokens, zero network delta per click, tab/scroll state preserved across cycling, theme persists across reload',
+    'all theme-switching checks passed: 13 distinct-per-theme surfaces (including Settings and the new .prose sub-elements), no unstyled Chroma tokens, zero network delta per click, tab/scroll state preserved across cycling, theme persists across reload, heading hierarchy has no color collisions and clears 3:1 in every theme, WCAG text/marker vars clear their bars in every theme, hairline/background vars are wired in every theme',
   );
 }

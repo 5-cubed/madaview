@@ -41,3 +41,21 @@ More trailing padding paragraph text, to make this fixture tall enough
 that the content pane actually scrolls in a real browser viewport during
 the e2e run. Repeated once more for good measure, so the total rendered
 height comfortably exceeds a typical headless viewport.
+
+A paragraph with **bold emphasis** to exercise `--tw-prose-bold`.
+
+> A blockquote to exercise `--tw-prose-quotes` and `--tw-prose-quote-borders`.
+
+- An unordered list item to exercise `--tw-prose-bullets`.
+- A second unordered list item.
+
+1. An ordered list item to exercise `--tw-prose-counters`.
+2. A second ordered list item.
+
+| Header One | Header Two |
+| --- | --- |
+| Cell one | Cell two |
+
+---
+
+A paragraph with an `inline code span` to exercise `--tw-prose-code`.

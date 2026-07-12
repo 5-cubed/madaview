@@ -22,12 +22,12 @@
   --text-muted: #59636e;
   --accent: #0969da;
 
-  --h1: #1f2328;
-  --h2: #1f2328;
+  --h1: #0a3069;
+  --h2: #0969da;
   --h3: #24292f;
-  --h4: #24292f;
-  --h5: #57606a;
-  --h6: #57606a;
+  --h4: #57606a;
+  --h5: #6e7781;
+  --h6: #7c8591;
   --md-link: #0969da;
 
   --code-bg: #f6f8fa;
@@ -51,12 +51,12 @@
   --text-muted: #8d96a0;
   --accent: #4493f8;
 
-  --h1: #e6edf3;
-  --h2: #e6edf3;
+  --h1: #a5d6ff;
+  --h2: #79c0ff;
   --h3: #f0f6fc;
-  --h4: #f0f6fc;
-  --h5: #8d96a0;
-  --h6: #8d96a0;
+  --h4: #c9d1d9;
+  --h5: #8b949e;
+  --h6: #9ea7b3;
   --md-link: #4493f8;
 
   --code-bg: #161b22;
@@ -80,11 +80,11 @@
   --text-muted: #9a9aad;
   --accent: #7e9cd8;
 
-  --h1: #dcd7ba;
+  --h1: #e6c384;
   --h2: #c8c093;
   --h3: #957fb8;
   --h4: #a3d4d5;
-  --h5: #9a9aad;
+  --h5: #c0a36e;
   --h6: #9a9aad;
   --md-link: #7e9cd8;
 
@@ -114,7 +114,7 @@
   --h3: #b8bb26;
   --h4: #8ec07c;
   --h5: #a89984;
-  --h6: #a89984;
+  --h6: #bdae93;
   --md-link: #83a598;
 
   --code-bg: #32302f;
@@ -138,11 +138,11 @@
   --text-muted: #657b83;
   --accent: #268bd2;
 
-  --h1: #073642;
-  --h2: #073642;
-  --h3: #586e75;
+  --h1: #002b36;
+  --h2: #268bd2;
+  --h3: #cb4b16;
   --h4: #586e75;
-  --h5: #657b83;
+  --h5: #9d7300;
   --h6: #657b83;
   --md-link: #268bd2;
 
@@ -168,11 +168,11 @@
   --accent: #61afef;
 
   --h1: #e5c07b;
-  --h2: #e5c07b;
+  --h2: #c678dd;
   --h3: #61afef;
   --h4: #56b6c2;
-  --h5: #abb2bf;
-  --h6: #5c6370;
+  --h5: #98c379;
+  --h6: #7f848e;
   --md-link: #61afef;
 
   --code-bg: #21252b;
@@ -211,6 +211,37 @@
 }
 .prose a {
   color: var(--md-link);
+}
+
+/* Everything @tailwindcss/typography styles via its own --tw-prose-*
+ * custom properties (body text, bold, blockquotes, list markers, table
+ * borders, captions, <hr>, inline code, pre background) otherwise falls
+ * back to the plugin's hardcoded light-mode palette regardless of the
+ * active theme (see tw-prose-vars-unwired-to-theme-tokens). Remapping
+ * these once, here, to the existing chrome/code tokens wires every
+ * .prose sub-element to the theme without duplicating this block per
+ * theme — --text/--border/--code-bg already differ per [data-theme]
+ * block above, so var() resolves correctly per theme automatically.
+ * --tw-prose-headings and --tw-prose-links are intentionally left
+ * unwired: the .prose h1..h6 and .prose a rules above already win on
+ * specificity, so the plugin's own vars for those are moot. --tw-prose-kbd,
+ * --tw-prose-kbd-shadows, and --tw-prose-lead are also left unwired: GFM
+ * markdown can't produce <kbd> or class="lead" without raw HTML. */
+.prose {
+  --tw-prose-body: var(--text);
+  --tw-prose-headings: var(--text);
+  --tw-prose-bold: var(--text);
+  --tw-prose-quotes: var(--text);
+  --tw-prose-captions: var(--text);
+  --tw-prose-code: var(--text);
+  --tw-prose-pre-code: var(--text);
+  --tw-prose-bullets: var(--text);
+  --tw-prose-counters: var(--text);
+  --tw-prose-hr: var(--border);
+  --tw-prose-quote-borders: var(--border);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--border);
+  --tw-prose-pre-bg: var(--code-bg);
 }
 
 /* Chroma emits ~80 distinct token classes (see codeblock.go /
