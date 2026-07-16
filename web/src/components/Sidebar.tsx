@@ -1,12 +1,44 @@
 import { useEffect, useState } from 'react'
+import { VscLayoutSidebarLeft, VscLayoutSidebarLeftOff } from 'react-icons/vsc'
 import { fetchTree } from '../api'
 import { useWorkspace } from '../useWorkspace'
 import type { TreeEntry } from '../types'
 
+function getStoredFolded(): boolean {
+  return localStorage.getItem('madaview:sidebar-folded') === 'true'
+}
+
+function setStoredFolded(folded: boolean): void {
+  localStorage.setItem('madaview:sidebar-folded', String(folded))
+}
+
 export function Sidebar() {
+  const [folded, setFolded] = useState(() => getStoredFolded())
+
+  const handleToggle = () => {
+    const next = !folded
+    setFolded(next)
+    setStoredFolded(next)
+  }
+
   return (
-    <nav className="w-64 shrink-0 overflow-y-auto border-r border-[var(--border)] bg-[var(--bg)] p-3 text-[var(--text)]">
-      <TreeLevel path="" />
+    <nav
+      className={`shrink-0 overflow-y-auto border-r border-[var(--border)] bg-[var(--bg)] text-[var(--text)] transition-[width] duration-200 ease-in-out ${folded ? 'w-10 p-1' : 'w-64 p-3'}`}
+      data-testid="sidebar"
+      data-folded={folded}
+    >
+      <button
+        type="button"
+        data-testid="sidebar-toggle"
+        aria-label={folded ? 'Expand sidebar' : 'Collapse sidebar'}
+        onClick={handleToggle}
+        className="block w-full p-2 rounded hover:bg-[var(--bg-subtle)]"
+      >
+        {folded ? <VscLayoutSidebarLeftOff size={16} /> : <VscLayoutSidebarLeft size={16} />}
+      </button>
+      <div data-testid="sidebar-tree" className={folded ? 'hidden' : ''}>
+        <TreeLevel path="" />
+      </div>
     </nav>
   )
 }

@@ -1,0 +1,104 @@
+#!/usr/bin/env node
+// Verifies result/interaction.json from the last `run`: sidebar starts
+// open, folds/unfolds correctly, preserves tree state, persists across
+// reload, and falls back to open on corrupted localStorage.
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { readResultJSON, report } from '../lib/harness.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+const resultDir = path.join(SCENARIO_DIR, 'result');
+
+const interaction = readResultJSON(resultDir, 'interaction.json');
+const problems = [];
+
+const check = (condition, message) => {
+  if (!condition) problems.push(message);
+};
+
+// Helper: allow floating point comparison for widths (256px ≈ 255.78px)
+const closeToWidth = (actual, expected, tolerance = 2) => {
+  const actualNum = parseFloat(actual);
+  const expectedNum = parseFloat(expected);
+  return Math.abs(actualNum - expectedNum) <= tolerance;
+};
+
+// Step 1: Initial state
+check(
+  interaction.initial?.dataFolded === 'false',
+  `initial: expected data-folded="false", got "${interaction.initial?.dataFolded}"`,
+);
+check(
+  closeToWidth(interaction.initial?.width, '256px'),
+  `initial: expected width≈256px, got ${interaction.initial?.width}`,
+);
+
+// Step 3: Folded state
+check(
+  interaction.folded?.dataFolded === 'true',
+  `folded: expected data-folded="true", got "${interaction.folded?.dataFolded}"`,
+);
+check(
+  closeToWidth(interaction.folded?.width, '40px'),
+  `folded: expected width≈40px, got ${interaction.folded?.width}`,
+);
+check(
+  interaction.folded?.transitionDuration === '0.2s',
+  `folded: expected transitionDuration=0.2s, got ${interaction.folded?.transitionDuration}`,
+);
+check(
+  interaction.folded?.treeDisplay === 'none',
+  `folded: expected treeDisplay=none, got ${interaction.folded?.treeDisplay}`,
+);
+check(
+  interaction.folded?.storedValue === 'true',
+  `folded: expected localStorage="true", got "${interaction.folded?.storedValue}"`,
+);
+
+// Step 4: After reload (persistence check while folded)
+check(
+  interaction.afterReload?.dataFolded === 'true',
+  `afterReload: expected data-folded="true", got "${interaction.afterReload?.dataFolded}"`,
+);
+check(
+  closeToWidth(interaction.afterReload?.width, '40px'),
+  `afterReload: expected width≈40px, got ${interaction.afterReload?.width}`,
+);
+
+// Step 5: Unfolded state (tree stayed mounted)
+check(
+  interaction.unfolded?.dataFolded === 'false',
+  `unfolded: expected data-folded="false", got "${interaction.unfolded?.dataFolded}"`,
+);
+check(
+  closeToWidth(interaction.unfolded?.width, '256px'),
+  `unfolded: expected width≈256px, got ${interaction.unfolded?.width}`,
+);
+check(
+  interaction.unfolded?.treeDisplay !== 'none',
+  `unfolded: expected treeDisplay not "none", got ${interaction.unfolded?.treeDisplay}`,
+);
+check(
+  interaction.unfolded?.rowCount === interaction.beforeToggle?.initialRowCount,
+  `unfolded: expected rowCount=${interaction.beforeToggle?.initialRowCount}, got ${interaction.unfolded?.rowCount}`,
+);
+check(
+  interaction.unfolded?.requestsAfterUnfold === 0,
+  `unfolded: expected no new requests after unfold, got ${interaction.unfolded?.requestsAfterUnfold} new requests`,
+);
+
+// Step 6: After garbage value (fallback to open)
+check(
+  interaction.afterGarbage?.dataFolded === 'false',
+  `afterGarbage: expected data-folded="false", got "${interaction.afterGarbage?.dataFolded}"`,
+);
+check(
+  closeToWidth(interaction.afterGarbage?.width, '256px'),
+  `afterGarbage: expected width≈256px, got ${interaction.afterGarbage?.width}`,
+);
+
+if (problems.length > 0) {
+  report('unexpected', problems.join('\n'));
+} else {
+  report('good', 'all sidebar fold/unfold checks passed');
+}

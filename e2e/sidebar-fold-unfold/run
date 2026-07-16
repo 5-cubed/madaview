@@ -1,0 +1,156 @@
+#!/usr/bin/env node
+// Scenario: sidebar fold/unfold toggle
+// Drives the sidebar toggle through fold/unfold cycles, checking:
+// 1. Initial state: sidebar open at w-64, data-folded="false"
+// 2. After toggle click: sidebar folded at w-10, data-folded="true",
+//    tree hidden, localStorage set, transition timing correct
+// 3. After unfold: folder expand-state survives (no re-fetch on unfold)
+// 4. After reload: folded state persisted, renders on first paint
+// 5. After localStorage corruption: falls back to open
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { resetResultDir, startServer, nextPort, writeMetadata, writeJSON, writeText } from '../lib/harness.mjs';
+import { withPage } from '../lib/browser.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+const FIXTURE_ROOT = path.join(SCENARIO_DIR, 'data');
+
+async function main() {
+  const resultDir = await resetResultDir(SCENARIO_DIR);
+  const port = nextPort();
+  const server = await startServer({ root: FIXTURE_ROOT, port });
+
+  try {
+    const interaction = {};
+
+    await withPage(async (page, requests) => {
+      // Step 1: Fresh load, no stored key
+      await page.goto(`http://localhost:${port}/view/readme.md`, { waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('[data-testid="sidebar"]', { timeout: 10000 });
+
+      const nav = page.locator('[data-testid="sidebar"]');
+      const navStyle = await nav.evaluate((el) => {
+        const computed = window.getComputedStyle(el);
+        return {
+          width: computed.width,
+          dataFolded: el.getAttribute('data-folded'),
+        };
+      });
+
+      interaction.initial = {
+        dataFolded: navStyle.dataFolded,
+        width: navStyle.width,
+      };
+
+      // Step 2: Get initial row count and request count
+      const initialRowCount = await page.locator('[data-testid="sidebar-tree"] li').count().catch(() => 0);
+      const requestsBeforeToggle = requests.length;
+
+      interaction.beforeToggle = {
+        initialRowCount,
+        requestsBeforeToggle,
+      };
+
+      // Step 3: Click toggle to fold
+      const toggleBtn = page.locator('[data-testid="sidebar-toggle"]');
+      await toggleBtn.waitFor({ timeout: 5000 });
+      await toggleBtn.click();
+      await page.waitForTimeout(250); // wait for transition plus a bit
+
+      const foldedNav = page.locator('[data-testid="sidebar"]');
+      const foldedStyle = await foldedNav.evaluate((el) => {
+        const computed = window.getComputedStyle(el);
+        const treeWrapper = document.querySelector('[data-testid="sidebar-tree"]');
+        const treeComputed = window.getComputedStyle(treeWrapper || { display: 'block' });
+        return {
+          width: computed.width,
+          dataFolded: el.getAttribute('data-folded'),
+          transitionDuration: computed.transitionDuration,
+          treeDisplay: treeComputed?.display || 'visible',
+        };
+      });
+
+      const storedAfterFold = await page.evaluate(() => localStorage.getItem('madaview:sidebar-folded'));
+
+      interaction.folded = {
+        ...foldedStyle,
+        storedValue: storedAfterFold,
+      };
+
+      // Step 4: Reload to test persistence while still folded
+      await page.reload();
+      await page.waitForSelector('[data-testid="sidebar"]');
+      await page.waitForTimeout(50);
+
+      const reloadNav = page.locator('[data-testid="sidebar"]');
+      const reloadedStyle = await reloadNav.evaluate((el) => {
+        const computed = window.getComputedStyle(el);
+        return {
+          width: computed.width,
+          dataFolded: el.getAttribute('data-folded'),
+        };
+      });
+
+      interaction.afterReload = {
+        ...reloadedStyle,
+      };
+
+      // Step 5: Reset request counter after reload, then click toggle to unfold and verify tree state survived
+      const requestsBeforeUnfold = requests.length; // Reset baseline after reload
+      await toggleBtn.click();
+      await page.waitForTimeout(250);
+
+      const unfoldedNav = page.locator('[data-testid="sidebar"]');
+      const unfoldedStyle = await unfoldedNav.evaluate((el) => {
+        const computed = window.getComputedStyle(el);
+        const treeWrapper = document.querySelector('[data-testid="sidebar-tree"]');
+        const treeComputed = window.getComputedStyle(treeWrapper || { display: 'block' });
+        return {
+          width: computed.width,
+          dataFolded: el.getAttribute('data-folded'),
+          treeDisplay: treeComputed?.display || 'visible',
+        };
+      });
+
+      const unfoldedRowCount = await page.locator('[data-testid="sidebar-tree"] li').count().catch(() => 0);
+      const requestsAfterUnfold = requests.length - requestsBeforeUnfold; // Count only new requests since unfold
+
+      interaction.unfolded = {
+        ...unfoldedStyle,
+        rowCount: unfoldedRowCount,
+        requestsAfterUnfold,
+      };
+
+      // Step 6: Corrupt localStorage and reload
+      await page.evaluate(() => localStorage.setItem('madaview:sidebar-folded', 'garbage'));
+      await page.reload();
+      await page.waitForSelector('[data-testid="sidebar"]');
+
+      const corruptNav = page.locator('[data-testid="sidebar"]');
+      const corruptStyle = await corruptNav.evaluate((el) => {
+        const computed = window.getComputedStyle(el);
+        return {
+          width: computed.width,
+          dataFolded: el.getAttribute('data-folded'),
+        };
+      });
+
+      interaction.afterGarbage = {
+        ...corruptStyle,
+      };
+
+      await writeJSON(resultDir, 'interaction.json', interaction);
+    });
+  } finally {
+    await writeText(resultDir, 'server.log', server.getLogs());
+    await server.stop();
+  }
+
+  await writeMetadata(resultDir, { scenario: 'sidebar-fold-unfold', fixture: FIXTURE_ROOT, port });
+  console.log(`run complete: ${resultDir}`);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
