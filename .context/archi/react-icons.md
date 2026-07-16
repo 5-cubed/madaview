@@ -1,6 +1,6 @@
 # Architecture: Add react-icons dependency for VSCode-style icons
 
-**ADR:** `.context/adr/react-icons.md`
+**ADR:** `.context/adr/20260716-215527-react-icons.merged.md`
 
 ## Static View
 > This change is manifest-only — no classes, no Objects/Logics/Usecase/External layers, no directory structure change. The only artifact is a dependency declaration.

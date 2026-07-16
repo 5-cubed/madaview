@@ -51,10 +51,7 @@ that decision belongs to the primary session, never to you.
    ```
    Record pass/fail per check — do not stop early on a failure, finish gathering all results
    first so the report is complete.
-4. Check whether `.context/changelog/` has an entry covering the work since the last tag
-   (`ls .context/changelog/<year>/` and read the most recent file). Only check currency —
-   never write or edit an entry yourself.
-5. Report (see Done check below) and stop. Do not tag, do not push.
+4. Report (see Done check below) and stop. Do not tag, do not push.
 
 ## Mode: verify
 
@@ -88,8 +85,8 @@ Given a tag name that the primary session has already pushed:
 - Ambiguous version: the candidate versions considered and why it's unclear — nothing else
   was executed.
 - Ready: the determined next version, each pre-flight check's pass/fail with failure detail
-  for any that failed, changelog currency status, and an explicit "awaiting your go-ahead to
-  tag and push `<version>`" — do not imply you will proceed further on your own.
+  for any that failed, and an explicit "awaiting your go-ahead to tag and push `<version>`" —
+  do not imply you will proceed further on your own.
 
 **verify mode**, report:
 - The run URL and every job's conclusion.

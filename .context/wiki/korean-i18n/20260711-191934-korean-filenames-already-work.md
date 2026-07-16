@@ -1,3 +1,0 @@
-# Korean (UTF-8) filenames already round-trip correctly
-
-No server or client code changes are needed for Korean (or any UTF-8) filenames/foldernames to work through the API. `web/src/api.ts` already wraps the `path` query param in `encodeURIComponent` for both `/api/tree` and `/api/file`, and Go's `net/url` + `encoding/json` handle UTF-8 natively on the server side. This was verified by grepping for encoding calls before scoping the Korean-content-rendering feature — it's a non-issue, not something to re-investigate or "fix" later. The only real gap for Korean content is font glyph coverage (display), not path encoding (transport).
