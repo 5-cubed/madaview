@@ -1,0 +1,161 @@
+#!/usr/bin/env node
+// Scenario: sidebar drag-to-width resize
+// Drives the resize handle through a single continuous drag plus several
+// reload cycles, checking:
+// 1. Initial load honors a pre-existing stored width (not the old fixed w-64)
+// 2. The resize handle exists, unfolded, with cursor: col-resize
+// 3. Mid-drag: width tracks the cursor 1:1, transition suppressed
+// 4. Clamping: width never visibly exceeds [180, 600] mid-drag
+// 5. Drag end: localStorage written exactly once, transition restored
+// 6. Reload: persisted width renders on first paint
+// 7. Invalid stored value: falls back to the default, 256px
+// 8. Out-of-range stored value: clamps into range, not the default
+// 9. Folded: handle disappears; unfolded: last custom width restored
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { resetResultDir, startServer, nextPort, writeMetadata, writeJSON, writeText } from '../lib/harness.mjs';
+import { withPage } from '../lib/browser.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+const FIXTURE_ROOT = path.join(SCENARIO_DIR, 'data');
+
+async function readNavAndHandle(page) {
+  const nav = page.locator('[data-testid="sidebar"]');
+  const navStyle = await nav.evaluate((el) => {
+    const computed = window.getComputedStyle(el);
+    return { width: computed.width, transitionDuration: computed.transitionDuration };
+  });
+  const handle = page.locator('[data-testid="sidebar-resize-handle"]');
+  const handleExists = (await handle.count()) > 0 && (await handle.isVisible().catch(() => false));
+  return { navStyle, handleExists };
+}
+
+async function main() {
+  const resultDir = await resetResultDir(SCENARIO_DIR);
+  const port = nextPort();
+  const server = await startServer({ root: FIXTURE_ROOT, port });
+
+  try {
+    const interaction = {};
+
+    await withPage(async (page) => {
+      // Step 1: preset a non-default stored width, then (re)load so the app
+      // picks it up on mount. Deliberately not page.addInitScript — that
+      // persists across every later page.reload() in this script and would
+      // keep overwriting the 'garbage'/'900' values steps 5-6 set right
+      // before their own reloads.
+      await page.goto(`http://localhost:${port}/view/readme.md`, { waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('[data-testid="sidebar"]', { timeout: 10000 });
+      await page.evaluate(() => localStorage.setItem('madaview:sidebar-width', '400'));
+      await page.reload();
+      await page.waitForSelector('[data-testid="sidebar"]', { timeout: 10000 });
+
+      const { navStyle: initialStyle, handleExists: initialHandleExists } = await readNavAndHandle(page);
+      const handleCursor = await page
+        .locator('[data-testid="sidebar-resize-handle"]')
+        .evaluate((el) => window.getComputedStyle(el).cursor);
+
+      interaction.initial = {
+        width: initialStyle.width,
+        handleExists: initialHandleExists,
+        handleCursor,
+      };
+
+      // Step 2: instrument localStorage.setItem to count writes to the
+      // sidebar-width key across the whole drag
+      await page.evaluate(() => {
+        window.__sidebarWidthWrites = 0;
+        const orig = localStorage.setItem.bind(localStorage);
+        localStorage.setItem = (key, value) => {
+          if (key === 'madaview:sidebar-width') window.__sidebarWidthWrites += 1;
+          return orig(key, value);
+        };
+      });
+
+      // Step 3: drive a single continuous drag: mid-width -> past max ->
+      // past min -> settle at 400 -> release
+      const navBox = await page.locator('[data-testid="sidebar"]').boundingBox();
+      const handleBox = await page.locator('[data-testid="sidebar-resize-handle"]').boundingBox();
+
+      await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+      await page.mouse.down();
+
+      // Mid-drag: move to a point corresponding to a 400px-wide sidebar
+      await page.mouse.move(navBox.x + 400, handleBox.y + handleBox.height / 2);
+      const { navStyle: midDragStyle } = await readNavAndHandle(page);
+      interaction.midDrag = { width: midDragStyle.width, transitionDuration: midDragStyle.transitionDuration };
+
+      // Past the 600px max
+      await page.mouse.move(navBox.x + 700, handleBox.y + handleBox.height / 2);
+      const { navStyle: clampMaxStyle } = await readNavAndHandle(page);
+      interaction.clampedAtMax = { width: clampMaxStyle.width };
+
+      // Past the 180px min
+      await page.mouse.move(navBox.x + 100, handleBox.y + handleBox.height / 2);
+      const { navStyle: clampMinStyle } = await readNavAndHandle(page);
+      interaction.clampedAtMin = { width: clampMinStyle.width };
+
+      // Settle back at 400px and release
+      await page.mouse.move(navBox.x + 400, handleBox.y + handleBox.height / 2);
+      await page.mouse.up();
+      await page.waitForTimeout(50);
+
+      const { navStyle: afterDragStyle } = await readNavAndHandle(page);
+      const storedWidth = await page.evaluate(() => localStorage.getItem('madaview:sidebar-width'));
+      const writeCount = await page.evaluate(() => window.__sidebarWidthWrites);
+
+      interaction.afterDrag = {
+        width: afterDragStyle.width,
+        transitionDuration: afterDragStyle.transitionDuration,
+        storedWidth,
+        writeCount,
+      };
+
+      // Step 4: reload persists the width from the drag
+      await page.reload();
+      await page.waitForSelector('[data-testid="sidebar"]');
+      const { navStyle: afterReloadStyle } = await readNavAndHandle(page);
+      interaction.afterReload = { width: afterReloadStyle.width };
+
+      // Step 5: invalid stored value falls back to the default
+      await page.evaluate(() => localStorage.setItem('madaview:sidebar-width', 'garbage'));
+      await page.reload();
+      await page.waitForSelector('[data-testid="sidebar"]');
+      const { navStyle: afterInvalidStyle } = await readNavAndHandle(page);
+      interaction.afterInvalid = { width: afterInvalidStyle.width };
+
+      // Step 6: out-of-range stored value clamps rather than falling back
+      await page.evaluate(() => localStorage.setItem('madaview:sidebar-width', '900'));
+      await page.reload();
+      await page.waitForSelector('[data-testid="sidebar"]');
+      const { navStyle: afterOutOfRangeStyle } = await readNavAndHandle(page);
+      interaction.afterOutOfRange = { width: afterOutOfRangeStyle.width };
+
+      // Step 7: folding hides the handle; unfolding restores the last width
+      const toggleBtn = page.locator('[data-testid="sidebar-toggle"]');
+      await toggleBtn.waitFor({ timeout: 5000 });
+      await toggleBtn.click();
+      await page.waitForTimeout(250);
+      const { handleExists: foldedHandleExists } = await readNavAndHandle(page);
+      interaction.folded = { handleExists: foldedHandleExists };
+
+      await toggleBtn.click();
+      await page.waitForTimeout(250);
+      const { navStyle: unfoldedStyle, handleExists: unfoldedHandleExists } = await readNavAndHandle(page);
+      interaction.unfolded = { width: unfoldedStyle.width, handleExists: unfoldedHandleExists };
+
+      await writeJSON(resultDir, 'interaction.json', interaction);
+    });
+  } finally {
+    await writeText(resultDir, 'server.log', server.getLogs());
+    await server.stop();
+  }
+
+  await writeMetadata(resultDir, { scenario: 'sidebar-resize', fixture: FIXTURE_ROOT, port });
+  console.log(`run complete: ${resultDir}`);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

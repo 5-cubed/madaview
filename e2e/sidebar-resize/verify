@@ -1,0 +1,107 @@
+#!/usr/bin/env node
+// Verifies result/interaction.json from the last `run`: initial load honors
+// a stored width, dragging tracks the cursor and clamps live at [180, 600],
+// mouseup persists exactly once and restores the transition, reload/invalid/
+// out-of-range fallbacks behave correctly, and folding hides the handle.
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { readResultJSON, report } from '../lib/harness.mjs';
+
+const SCENARIO_DIR = path.dirname(fileURLToPath(import.meta.url));
+const resultDir = path.join(SCENARIO_DIR, 'result');
+
+const interaction = readResultJSON(resultDir, 'interaction.json');
+const problems = [];
+
+const check = (condition, message) => {
+  if (!condition) problems.push(message);
+};
+
+// Helper: allow floating point comparison for widths
+const closeToWidth = (actual, expected, tolerance = 2) => {
+  const actualNum = parseFloat(actual);
+  const expectedNum = parseFloat(expected);
+  return Math.abs(actualNum - expectedNum) <= tolerance;
+};
+
+// Initial load: honors a pre-existing stored width, handle present with
+// the correct cursor
+check(
+  closeToWidth(interaction.initial?.width, '400px'),
+  `initial: expected width≈400px, got ${interaction.initial?.width}`,
+);
+check(interaction.initial?.handleExists === true, `initial: expected resize handle to exist`);
+check(
+  interaction.initial?.handleCursor === 'col-resize',
+  `initial: expected cursor=col-resize, got ${interaction.initial?.handleCursor}`,
+);
+
+// Mid-drag: width tracks the cursor, transition suppressed
+check(
+  closeToWidth(interaction.midDrag?.width, '400px'),
+  `midDrag: expected width≈400px, got ${interaction.midDrag?.width}`,
+);
+check(
+  interaction.midDrag?.transitionDuration === '0s',
+  `midDrag: expected transitionDuration=0s (suppressed), got ${interaction.midDrag?.transitionDuration}`,
+);
+
+// Live clamping at both bounds
+check(
+  closeToWidth(interaction.clampedAtMax?.width, '600px'),
+  `clampedAtMax: expected width≈600px, got ${interaction.clampedAtMax?.width}`,
+);
+check(
+  closeToWidth(interaction.clampedAtMin?.width, '180px'),
+  `clampedAtMin: expected width≈180px, got ${interaction.clampedAtMin?.width}`,
+);
+
+// Drag end: single write, correct value, transition restored
+check(
+  closeToWidth(interaction.afterDrag?.width, '400px'),
+  `afterDrag: expected width≈400px, got ${interaction.afterDrag?.width}`,
+);
+check(
+  interaction.afterDrag?.transitionDuration === '0.2s',
+  `afterDrag: expected transitionDuration=0.2s (restored), got ${interaction.afterDrag?.transitionDuration}`,
+);
+check(
+  interaction.afterDrag?.storedWidth === '400',
+  `afterDrag: expected localStorage="400", got "${interaction.afterDrag?.storedWidth}"`,
+);
+check(
+  interaction.afterDrag?.writeCount === 1,
+  `afterDrag: expected exactly 1 localStorage write, got ${interaction.afterDrag?.writeCount}`,
+);
+
+// Reload persists the dragged width
+check(
+  closeToWidth(interaction.afterReload?.width, '400px'),
+  `afterReload: expected width≈400px, got ${interaction.afterReload?.width}`,
+);
+
+// Invalid stored value falls back to the default
+check(
+  closeToWidth(interaction.afterInvalid?.width, '256px'),
+  `afterInvalid: expected width≈256px (default), got ${interaction.afterInvalid?.width}`,
+);
+
+// Out-of-range stored value clamps into range, not the default
+check(
+  closeToWidth(interaction.afterOutOfRange?.width, '600px'),
+  `afterOutOfRange: expected width≈600px (clamped), got ${interaction.afterOutOfRange?.width}`,
+);
+
+// Folding hides the handle; unfolding restores the last custom width
+check(interaction.folded?.handleExists === false, `folded: expected resize handle to be hidden`);
+check(
+  closeToWidth(interaction.unfolded?.width, '600px'),
+  `unfolded: expected width≈600px (restored), got ${interaction.unfolded?.width}`,
+);
+check(interaction.unfolded?.handleExists === true, `unfolded: expected resize handle to reappear`);
+
+if (problems.length > 0) {
+  report('unexpected', problems.join('\n'));
+} else {
+  report('good', 'all sidebar resize checks passed');
+}
